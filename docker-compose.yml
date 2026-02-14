@@ -1,0 +1,15 @@
+services:
+  newsfeed:
+    image: python:3.14-slim
+    container_name: newsfeed_app
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
+    command: >
+      sh -c "mkdir -p data && 
+             pip install --no-cache-dir -r requirements.txt && 
+             python src/main.py"
