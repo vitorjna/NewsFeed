@@ -15,8 +15,11 @@ class Article:
     summary: str
     published: str
     source_feed: str
+    source_name: str
     theme: str
     image_url: Optional[str] = None
+    short_summary: Optional[str] = None
+    long_summary: Optional[str] = None
 
 class FeedFetcher:
     def __init__(self, db_path: str):
@@ -88,6 +91,9 @@ class FeedFetcher:
                 logger.info(f"Fetching {feed_url} for theme '{theme_name}'")
                 feed = feedparser.parse(feed_url)
                 
+                # Extract source name/publisher from feed metadata
+                source_name = feed.feed.get('title', feed_url)
+
                 if feed.bozo:
                     logger.warning(f"Feed {feed_url} has issues: {feed.bozo_exception}")
 
@@ -112,14 +118,11 @@ class FeedFetcher:
                         summary=summary,
                         published=published,
                         source_feed=feed_url,
+                        source_name=source_name,
                         theme=theme_name,
                         image_url=image_url
                     )
                     new_articles.append(article)
-                    # We mark as seen *after* successful processing ideally, 
-                    # but here we mark it now to avoid re-fetching in valid runs.
-                    # If analysis fails, we might want to retry, but let's keep it simple for now.
-                    self.mark_seen(link)
 
             except Exception as e:
                 logger.error(f"Error fetching feed {feed_url}: {e}")

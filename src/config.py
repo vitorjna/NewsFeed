@@ -25,7 +25,11 @@ class AppConfig:
     llm: LLMConfig
     fetch_interval_minutes: int
     database_path: str
+    min_relevance_score: int
+    min_importance_score: int
+    min_urgency_score: int
     themes: List[FeedConfig]
+    debug: bool = False
 
 def load_config(config_path: str = "config/config.yaml") -> AppConfig:
     """
@@ -63,7 +67,11 @@ def load_config(config_path: str = "config/config.yaml") -> AppConfig:
             llm=llm_conf,
             fetch_interval_minutes=raw_config.get('fetch_interval_minutes', 15),
             database_path=raw_config.get('database_path', 'data/seen_urls.db'),
-            themes=themes
+            min_relevance_score=raw_config.get('min_relevance_score', 8),
+            min_importance_score=raw_config.get('min_importance_score', 8),
+            min_urgency_score=raw_config.get('min_urgency_score', 8),
+            themes=themes,
+            debug=raw_config.get('debug', False)
         )
         logger.info("Configuration loaded successfully")
         return config

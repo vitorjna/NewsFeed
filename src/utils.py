@@ -17,3 +17,19 @@ def setup_logger(name: str = "NewsFeedApp", level=logging.INFO):
         logger.addHandler(handler)
     
     return logger
+
+def extract_json(content: str) -> str:
+    """
+    Cleans the LLM response to extract only the JSON part.
+    Removes markdown code blocks if present.
+    """
+    content = content.strip()
+    if content.startswith("```json"):
+        content = content[7:]
+    elif content.startswith("```"):
+        content = content[3:]
+    
+    if content.endswith("```"):
+        content = content[:-3]
+        
+    return content.strip()

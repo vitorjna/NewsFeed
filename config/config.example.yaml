@@ -1,38 +1,50 @@
 # Configuration for News Feed Application
 
-# Telegram Bot Token
+# Telegram Bot Token (from @BotFather)
 telegram_bot_token: "YOUR_TELEGRAM_BOT_TOKEN"
 
-# LLM Configuration (supports local providers like LM Studio/Ollama)
+# LLM Configuration: Supports local providers (LM Studio, Ollama) or cloud providers.
 llm:
-  api_key: "not-needed-for-local" # Use your API key or a placeholder for local
-  base_url: "http://localhost:1234/v1" # LM Studio default: http://localhost:1234/v1 | Ollama: http://localhost:11434/v1
-  model: "local-model" # The name of the model loaded in your provider
+  api_key: "not-needed-for-local" # Key or placeholder for local providers
+  base_url: "http://localhost:1234/v1" # LM Studio: http://localhost:1234/v1 | Ollama: http://localhost:11434/v1
+  model: "local-model" # The specific model loaded in your provider
 
-# Global Settings
-fetch_interval_minutes: 15
+# Global Application Settings
+fetch_interval_minutes: 5
 database_path: "data/seen_urls.db"
+debug: false
 
-# Themes and Channels
-# Each theme has a target Telegram channel ID and a list of RSS feeds.
+# Posting Thresholds: An article is posted if ANY score meets or exceeds these values.
+min_relevance_score: 8
+min_importance_score: 8
+min_urgency_score: 8
+
+# Themes and Channels: Define topics, target channels, and source RSS feeds.
 themes:
   - name: "Breaking News"
     channel_id: "-1001234567890" # Example Channel ID
     feeds:
       - "http://feeds.bbci.co.uk/news/world/rss.xml"
       - "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"
-    prompt_focus: "breaking news, major world events, high urgency"
+    prompt_focus: >
+      breaking news, major world events, high urgency. 
+      FOCUS on events with global impact. 
+      REJECT local stories or minor updates.
 
   - name: "Science"
     channel_id: "-1000987654321"
     feeds:
       - "https://www.sciencedaily.com/rss/top/science.xml"
       - "https://rss.nytimes.com/services/xml/rss/nyt/Science.xml"
-    prompt_focus: "scientific discoveries, research, space, technology"
+    prompt_focus: >
+      scientific discoveries, peer-reviewed research, space exploration. 
+      REJECT pop-science fluff or speculative articles.
 
   - name: "Tech"
     channel_id: "-1001122334455"
     feeds:
       - "https://feeds.feedburner.com/TechCrunch/"
       - "https://www.theverge.com/rss/index.xml"
-    prompt_focus: "new technology, software, hardware, startups"
+    prompt_focus: >
+      cutting-edge technology, major software/hardware releases, AI breakthroughs. 
+      STRICTLY REJECT sales, deals, or promotional content.

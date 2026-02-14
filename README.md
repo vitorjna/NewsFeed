@@ -22,7 +22,8 @@ A generic, automated news feed application that fetches news from RSS feeds, ana
    Copy `config/config.example.yaml` to `config/config.yaml` and fill in your details:
    - `telegram_bot_token`: Your Telegram Bot Token (from @BotFather).
    - `llm`: Configure your local provider endpoint (e.g., LM Studio: `http://localhost:1234/v1` or Ollama: `http://localhost:11434/v1`) and the loaded model name.
-   - `themes`: Define your channels and their RSS feeds.
+   - `min_relevance_score` / `min_importance_score` / `min_urgency_score`: Set thresholds (0-10) for posting. An article is published if any score meets its threshold.
+   - `themes`: Define your channels, RSS feeds, and `prompt_focus` for specialized filtering.
    
    *Note: Ensure your bot is an admin in the target channels.*
 
