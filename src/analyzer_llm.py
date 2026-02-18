@@ -52,19 +52,32 @@ class NewsAnalyzer:
         Content/Summary: {article.summary}
         """
 
+        # Gemini's OpenAI-compatible API often fails with 'system' role for some models (Gemma)
+        if "google" in str(self.llm_client.base_url).lower():
+            messages = [
+                {"role": "user", "content": f"{system_prompt}\n\nUSER REQUEST:\n{user_content}"}
+            ]
+
+        else:
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content}
+            ]
+
         try:
             response = self.llm_client.chat.completions.create(
                 model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_content}
-                ]
+                messages=messages
             )
-            
+
             content = response.choices[0].message.content
+            if not content:
+                logger.warning(f"Empty response from LLM for {article.title} (possibly safety block)")
+                return None
+
             content = extract_json(content)
             data = json.loads(content)
-            
+
             return AnalysisResult(
                 relevance_score=data.get('relevance_score', 0),
                 importance_score=data.get('importance_score', 0),
@@ -76,40 +89,64 @@ class NewsAnalyzer:
             logger.error(f"Error analyzing scores for {article.title}: {e}")
             return None
 
-    def analyze_summaries(self, article: Article) -> Optional[Dict[str, str]]:
+    def analyze_summaries(self, article: Article, language: Optional[str] = None) -> Optional[Dict[str, str]]:
         """
         Generates short and long summaries for an article.
         Returns a dictionary with 'short_summary' and 'long_summary'.
         """
         logger.info(f"Generating summaries for article: {article.title}")
 
-        system_prompt = """
+        lang_instruction = f"The summaries MUST be written in {language}." if language else "The summaries MUST be written in the same language as the news article provided."
+
+        system_prompt = f"""
         You are a professional news editor.
         Your goal is to summarize news articles for a Telegram channel.
 
+        CRITICAL: {lang_instruction}
+
         Output must be strict JSON format with the following keys:
-        - short_summary: string (1-2 sentences, engaging, suitable for a quick notification)
-        - long_summary: string (2-3 paragraphs, summary of the content in a few short sentences, so the user gets all the info with a quick glance)
+        - short_summary: string (1-2 sentences, engaging, suitable for a quick notification.)
+        - long_summary: string (2-3 paragraphs. Each paragraph MUST start with an appropriate emoji related to its content. The summary should be concise, covering the main points of the article.)
+
+        FORMATTING RULES:
+        - DO NOT USE MARKDOWN (no **, __, [], etc.).
+        - Use HTML tags only for emphasis: <b>bold</b>, <i>italic</i>, <u>underline</u>.
+        - If the text contains characters that might break HTML (like < or > that are not part of tags), escape them or ensure they don't break the structure.
 
         IMPORTANT: Response must be ONLY the JSON object. Do not include any explanations, greetings, or markdown markers outside the JSON.
         """
 
+        content_to_summarize = article.full_text if article.full_text else article.summary
+        content_type = "Full Article Text" if article.full_text else "RSS Summary"
+
         user_content = f"""
         Title: {article.title}
         Link: {article.link}
-        Content/Summary: {article.summary}
+        {content_type}: {content_to_summarize}
         """
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content}
+        ]
+
+        # Gemini's OpenAI-compatible API often fails with 'system' role for some models (Gemma)
+        if "google" in str(self.llm_client.base_url).lower():
+            messages = [
+                {"role": "user", "content": f"{system_prompt}\n\nUSER REQUEST:\n{user_content}"}
+            ]
 
         try:
             response = self.llm_client.chat.completions.create(
                 model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_content}
-                ]
+                messages=messages
             )
 
             content = response.choices[0].message.content
+            if not content:
+                logger.warning(f"Empty response from LLM summaries for {article.title} (possibly safety block)")
+                return None
+
             content = extract_json(content)
             data = json.loads(content)
 

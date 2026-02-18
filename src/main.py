@@ -1,10 +1,14 @@
 import asyncio
+import os
 import time
 import schedule
 import signal
+import logging
+from datetime import datetime
 from .config import load_config
 from .utils import setup_logger
 from .fetcher import FeedFetcher
+from .database import DatabaseManager
 from .analyzer_llm import NewsAnalyzer
 from .publisher import TelegramPublisher
 
@@ -12,22 +16,25 @@ logger = setup_logger("Main")
 
 class NewsFeedApp:
     def __init__(self, config_path: str = "config/config.yaml"):
-        from . import analyzer_llm, fetcher, publisher, config as config_mod
+        from . import analyzer_llm, fetcher, publisher, config as config_mod, cross_promoter, database
         self.config = load_config(config_path)
 
         if self.config.debug:
-            import logging
             level = logging.DEBUG
             logger.setLevel(level)
             analyzer_llm.logger.setLevel(level)
             fetcher.logger.setLevel(level)
             publisher.logger.setLevel(level)
             config_mod.logger.setLevel(level)
+            cross_promoter.logger.setLevel(level)
+            database.logger.setLevel(level)
             logger.debug("Debug mode enabled")
 
-        self.fetcher = FeedFetcher(self.config.database_path)
+        self.db = DatabaseManager(self.config.database_path)
+        self.fetcher = FeedFetcher(self.db)
         self.analyzer = NewsAnalyzer(self.config.llm)
         self.publisher = TelegramPublisher(self.config.telegram_bot_token)
+        self.cross_promoter = cross_promoter.CrossPromoter(self.config, self.analyzer)
 
     async def run_cycle(self):
         """
@@ -39,9 +46,17 @@ class NewsFeedApp:
             logger.info(f"Processing theme: {theme.name}")
 
             # 1. Fetch
-            new_articles = self.fetcher.fetch_feeds(theme.feeds, theme.name)
+            new_articles = self.fetcher.fetch_feeds(
+                theme.feeds,
+                theme.name,
+                max_age_hours=self.config.max_article_age_hours
+            )
 
             for article in new_articles:
+                # Add a small delay to respect rate limits (especially for Gemini free tier)
+                if self.config.llm.base_url and "google" in self.config.llm.base_url.lower():
+                    await asyncio.sleep(2) # 30 RPM limit = 2s per request. We do 2 calls per article usually.
+
                 # 2. Analyze Scores first
                 scores = self.analyzer.analyze_scores(article, theme.prompt_focus)
 
@@ -49,45 +64,75 @@ class NewsFeedApp:
                     logger.warning(f"Score analysis failed for {article.title}. Skipping marking as seen to retry later.")
                     continue
 
+                should_mark_seen = False
+
                 # Check criteria (Relevance OR Importance OR Urgency)
                 is_relevant_enough = scores.relevance_score >= self.config.min_relevance_score
                 is_important_enough = scores.importance_score >= self.config.min_importance_score
                 is_urgent_enough = scores.urgency_score >= self.config.min_urgency_score
 
                 # 3. Decision and Logging
-                is_selected = is_relevant_enough or is_important_enough or is_urgent_enough
+                is_selected = is_relevant_enough and (is_important_enough or is_urgent_enough)
                 status = "SELECTED" if is_selected else "SKIPPED"
 
                 logger.info(
-                    f"[ANALYSIS] {status}: {article.title} | "
-                    f"Scores: R:{scores.relevance_score}, I:{scores.importance_score}, U:{scores.urgency_score} | "
+                    f"[ANALYSIS] {status}: Scores: R:{scores.relevance_score}, I:{scores.importance_score}, U:{scores.urgency_score} | "
+                    f"{article.title} | "
                     f"Reasoning: {scores.reasoning}"
                 )
 
                 if is_selected:
-                    # 4. Analyze Summaries
-                    summaries = self.analyzer.analyze_summaries(article)
+                    # 4. Similarity Check
+                    similar_title = self.fetcher.is_similar_already_published(article)
+                    if similar_title:
+                        logger.info(f"[SKIP] Similar article already published: '{similar_title}'")
+                        should_mark_seen = True
 
-                    if not summaries:
-                        logger.warning(f"Summary generation failed for {article.title}. Skipping.")
-                        continue
+                    else:
+                        # 5. Fetch full text for better summaries
+                        full_text = self.fetcher.fetch_full_text(article.link)
+                        if full_text:
+                            article.full_text = full_text
+                            logger.info(f"[FULL-TEXT] Extracted full text for {article.title} ({len(full_text)} characters)")
+                        else:
+                            logger.warning(f"[FULL-TEXT] Failed or skipped full text extraction for {article.title}")
 
-                    # Store summaries in Article
-                    article.short_summary = summaries['short_summary']
-                    article.long_summary = summaries['long_summary']
+                        # 6. Analyze Summaries
+                        summaries = self.analyzer.analyze_summaries(article, theme.language)
 
-                    logger.debug(f"[SUMMARIES] {article.title}\nShort: {article.short_summary}\nLong: {article.long_summary}")
+                        if summaries:
+                            # Store summaries in Article
+                            article.short_summary = summaries['short_summary']
+                            article.long_summary = summaries['long_summary']
+                            logger.debug(f"[SUMMARIES] {article.title}\nShort: {article.short_summary}\nLong: {article.long_summary}")
+                        else:
+                            logger.warning(f"Summary generation failed for {article.title}. Defaulting to RSS summary.")
+                            article.short_summary = article.summary
+                            article.long_summary = None
 
-                    # 5. Publish
-                    try:
-                        await self.publisher.publish(article, scores, theme.channel_id)
-                        # Mark as seen only after successful publication attempts
-                        self.fetcher.mark_seen(article.link)
-                    except Exception as e:
-                        logger.error(f"Failed to publish {article.title}: {e}")
+                        # 7. Publish
+                        try:
+                            await self.publisher.publish(article, scores, theme.channel_id)
+                            self.fetcher.mark_published(article)
+                            should_mark_seen = True
+                        except Exception as e:
+                            logger.error(f"Failed to publish {article.title}: {e}")
+
                 else:
-                    # Mark as seen anyway since it's not selected
-                    self.fetcher.mark_seen(article.link)
+                    # Not selected, mark as seen
+                    should_mark_seen = True
+
+                if should_mark_seen:
+                    self.fetcher.mark_seen(
+                        article.link,
+                        theme.name,
+                        feed_name=article.source_name,
+                        feed_url=article.source_feed,
+                        relevance=scores.relevance_score,
+                        importance=scores.importance_score,
+                        urgency=scores.urgency_score,
+                        reasoning=scores.reasoning
+                    )
 
         logger.info("Update cycle completed")
 
@@ -95,7 +140,12 @@ class NewsFeedApp:
         """
         Starts the scheduler loop.
         """
-        logger.info(f"Starting News Feed App. Interval: {self.config.fetch_interval_minutes} minutes")
+        startup_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        logger.info("\n")
+        logger.info("=" * 60)
+        logger.info(f"🚀 NEWS FEED APP STARTUP 🚀")
+        logger.info(f"Startup Time: {startup_time}")
+        logger.info("=" * 60)
 
         # Initial run
         asyncio.run(self.run_cycle())
@@ -103,6 +153,24 @@ class NewsFeedApp:
         # Schedule
         schedule.every(self.config.fetch_interval_minutes).minutes.do(
             lambda: asyncio.run(self.run_cycle())
+        )
+
+        # Maintenance tasks (Every day at 03:00 AM)
+        schedule.every().day.at("03:00").do(
+            lambda: self.db.purge_old_entries(days=30)
+        )
+
+        # Statistics export (Every day at 03:05 AM)
+        os.makedirs("logs", exist_ok=True)
+        #schedule.every().day.at("03:05").do(
+        schedule.every(120).minutes.do(
+            lambda: self.db.export_statistics(f"logs/statistics_{datetime.now().strftime('%Y-%m-%d')}.txt")
+        )
+
+        # Cross-promotion schedule (Every Monday at 09:00 AM)
+        #schedule.every().day.at("09:00").do(
+        schedule.every(120).minutes.do(
+            lambda: asyncio.run(self.cross_promoter.promote_channels())
         )
 
         running = True

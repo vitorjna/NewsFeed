@@ -39,3 +39,6 @@ config/config.yaml
 
 # Docker
 .docker/
+
+# Logs
+logs/

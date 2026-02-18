@@ -12,6 +12,7 @@ class FeedConfig:
     channel_id: str
     feeds: List[str]
     prompt_focus: str
+    language: Optional[str] = None
 
 @dataclass
 class LLMConfig:
@@ -24,6 +25,7 @@ class AppConfig:
     telegram_bot_token: str
     llm: LLMConfig
     fetch_interval_minutes: int
+    max_article_age_hours: int
     database_path: str
     min_relevance_score: int
     min_importance_score: int
@@ -39,7 +41,7 @@ def load_config(config_path: str = "config/config.yaml") -> AppConfig:
         logger.error(f"Config file not found at {config_path}")
         raise FileNotFoundError(f"Config file not found at {config_path}")
 
-    with open(config_path, 'r') as f:
+    with open(config_path, 'r', encoding='utf-8') as f:
         try:
             raw_config = yaml.safe_load(f)
         except yaml.YAMLError as e:
@@ -59,13 +61,15 @@ def load_config(config_path: str = "config/config.yaml") -> AppConfig:
                 name=theme['name'],
                 channel_id=theme['channel_id'],
                 feeds=theme['feeds'],
-                prompt_focus=theme.get('prompt_focus', "")
+                prompt_focus=theme.get('prompt_focus', ""),
+                language=theme.get('language')
             ))
 
         config = AppConfig(
             telegram_bot_token=raw_config['telegram_bot_token'],
             llm=llm_conf,
             fetch_interval_minutes=raw_config.get('fetch_interval_minutes', 15),
+            max_article_age_hours=raw_config.get('max_article_age_hours', 24),
             database_path=raw_config.get('database_path', 'data/seen_urls.db'),
             min_relevance_score=raw_config.get('min_relevance_score', 8),
             min_importance_score=raw_config.get('min_importance_score', 8),
