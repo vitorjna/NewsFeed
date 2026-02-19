@@ -1,111 +1,135 @@
-from typing import Dict
+from typing import Dict, Optional
 from telegram import Bot
+from telegram.constants import ParseMode
 from telegram.error import TelegramError
-from telegram.request import HTTPXRequest
 from .config import AppConfig
 from .utils import setup_logger
+from .bot_manager import TelegramBotManager
 
 logger = setup_logger("CrossPromoter")
 
 class CrossPromoter:
-    def __init__(self, config: AppConfig, analyzer):
+    def __init__(self, config: AppConfig, analyzer, bot_manager: TelegramBotManager):
         self.config = config
-        # Increase connection pool size and timeout to prevent "Pool timeout" errors
-        request = HTTPXRequest(connection_pool_size=20, read_timeout=20, write_timeout=20, connect_timeout=20, pool_timeout=20)
-        self.bot = Bot(token=config.telegram_bot_token, request=request)
+        self._bot_manager = bot_manager
         self.analyzer = analyzer
+        self._channel_cache: Dict[str, dict] = {}
 
-    async def _get_channel_details(self, channel_id: str) -> Dict[str, str]:
+        self.intro = "<b>📢 Expand your worldview!</b>\n\n<i>Select your interests and join our other channels:</i>"
+        self.outro = "👉 <i>Subscribe now and stay updated on the topics you care about!</i>"
+
+    async def _get_channel_details(self, bot: Bot, channel_id: str) -> Optional[Dict[str, str]]:
         """
-        Fetches channel details: title, username and invite link.
+        Fetches channel details: title, username and invite link with local caching.
         """
+        if channel_id in self._channel_cache:
+            return self._channel_cache[str(channel_id)]
+
         try:
-            chat = await self.bot.get_chat(chat_id=channel_id)
+            chat = await bot.get_chat(chat_id=channel_id)
             logger.debug(f"Fetched chat details for {channel_id}: Title='{chat.title}', Username='{chat.username}', InviteLink='{chat.invite_link}'")
-            return {
+            details = {
                 "title": chat.title,
                 "username": f"@{chat.username}" if chat.username else None,
                 "invite_link": chat.invite_link,
                 "id": channel_id
             }
+            self._channel_cache[channel_id] = details
+            return details
         except TelegramError as e:
             logger.error(f"Failed to fetch chat info for {channel_id}: {e}")
             return None
 
     def _get_theme_content(self, theme_name: str) -> tuple[str, str]:
-        """Returns (emoji, description) for a given theme."""
+        """Returns (emoji, tagline) for a given theme with improved descriptions."""
         name_lower = theme_name.lower()
 
         if "portugal" in name_lower:
-            return "🇵🇹", "Breaking news & updates from Portugal, in Portuguese"
+            return "🇵🇹", "Top news and updates from Portugal"
         if "world" in name_lower:
-            return "🌍", "Breaking world news & major global events"
+            return "🌍", "Major events and global perspectives"
         if "science" in name_lower:
-            return "🔬", "Science news & space exploration"
+            return "🔬", "Space news and scientific discoveries"
         if "tech" in name_lower:
-            return "💻", "Tech news & AI, gadgets & tech trends"
+            return "💻", "AI, gadgets, and tech industry news"
         if "entertainment" in name_lower:
-            return "🎬", "Movies, TV & celebrity news"
+            return "🎬", "Latest movie, TV, and celebrity news"
 
-        return "📰", "Top stories & daily updates"
+        return "📰", "Curated daily news and top stories"
 
-    async def generate_promo_message(self) -> str:
+    async def generate_promo_message(self, bot: Bot, exclude_channel_id: Optional[str] = None) -> str:
         """
-        Constructs the promotional message with hardcoded engaging descriptions.
+        Constructs the promotional message with engaging descriptions,
+        optionally excluding a specific channel.
         """
-        lines = [
-            "<b>📢 Expand your worldview with our network!</b>\n",
-            "<i>Select your interests and join our other channels:</i>\n"
-        ]
+        blocks = [self.intro]
 
         channels_added = 0
         for theme in self.config.themes:
-            details = await self._get_channel_details(theme.channel_id)
-            if not details:
-                logger.debug(f"Skipping theme '{theme.name}': Could not fetch channel details.")
+            # Skip the current channel if requested
+            if exclude_channel_id and theme.channel_id == exclude_channel_id:
                 continue
 
-            # Determine how to link to the channel
+            details = await self._get_channel_details(bot, theme.channel_id)
+            if not details:
+                logger.warning(f"Skipping theme '{theme.name}': Could not fetch channel details.")
+                continue
+
+            # Link to the channel
             link_display = None
             if details['username']:
                 link_display = details['username']
             elif details['invite_link']:
-                # Fallback to title with invite link if no public username
+                # Use title with invite link if no public username
                 link_display = f"<a href='{details['invite_link']}'>{details['title']}</a>"
 
             if not link_display:
-                logger.debug(f"Skipping theme '{theme.name}': No username or invite link available for channel {theme.channel_id}.")
+                logger.warning(f"Skipping theme '{theme.name}': No username or invite link available for channel {theme.channel_id}.")
                 continue
 
             emoji, description = self._get_theme_content(theme.name)
-            lines.append(f"{emoji} <b>{link_display}</b>: {description}")
+
+            # channel link
+            #   channel description
+            channel_block = f"<b>{link_display}</b>\n  {emoji} {description}"
+            blocks.append(channel_block)
             channels_added += 1
 
-        lines.append("\n👉 <i>Subscribe now and stay updated on the topics you care about!</i>")
+        if channels_added == 0:
+            return ""
 
-        message = "\n".join(lines)
-        logger.debug(f"Generated cross-promotion message (channels found: {channels_added}):\n{message}")
+        blocks.append(self.outro)
+
+        # Separate blocks with double newline for whitespace
+        message = "\n\n".join(blocks)
         return message
 
     async def promote_channels(self):
         """
-        Sends the promo message to all configured channels.
+        Sends a tailored promo message to all configured channels,
+        showing only the other channels in the network.
         """
-        message = await self.generate_promo_message()
-        if not message:
-            logger.warning("No promo message generated.")
-            return
+        async with self._bot_manager.create_bot() as bot:
+            logger.info("Starting tailored cross-promotion sequence...")
 
-        logger.info("Sending cross-promotion message...")
-        for theme in self.config.themes:
-            try:
-                await self.bot.send_message(
-                    chat_id=theme.channel_id,
-                    text=message,
-                    parse_mode='HTML',
-                    disable_notification=True
-                )
-                logger.info(f"Sent promo to {theme.name} ({theme.channel_id})")
-                logger.debug(f"Promo message: {message}")
-            except TelegramError as e:
-                logger.error(f"Failed to send promo to {theme.name}: {e}")
+            # Pre-cache all channel details to ensure efficiency
+            for theme in self.config.themes:
+                await self._get_channel_details(bot, theme.channel_id)
+
+            for theme in self.config.themes:
+                message = await self.generate_promo_message(bot, exclude_channel_id=theme.channel_id)
+
+                if not message:
+                    logger.warning(f"No promo message generated for {theme.name}.")
+                    continue
+
+                try:
+                    await bot.send_message(
+                        chat_id=theme.channel_id,
+                        text=message,
+                        parse_mode=ParseMode.HTML,
+                        disable_notification=True
+                    )
+                    logger.info(f"Sent tailored promo to {theme.name} ({theme.channel_id})")
+                except TelegramError as e:
+                    logger.error(f"Failed to send promo to {theme.name}: {e}")

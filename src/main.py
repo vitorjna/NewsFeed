@@ -11,6 +11,7 @@ from .fetcher import FeedFetcher
 from .database import DatabaseManager
 from .analyzer_llm import NewsAnalyzer
 from .publisher import TelegramPublisher
+from .bot_manager import TelegramBotManager
 
 logger = setup_logger("Main")
 
@@ -33,8 +34,9 @@ class NewsFeedApp:
         self.db = DatabaseManager(self.config.database_path)
         self.fetcher = FeedFetcher(self.db)
         self.analyzer = NewsAnalyzer(self.config.llm)
-        self.publisher = TelegramPublisher(self.config.telegram_bot_token)
-        self.cross_promoter = cross_promoter.CrossPromoter(self.config, self.analyzer)
+        self.bot_manager = TelegramBotManager(self.config.telegram_bot_token)
+        self.publisher = TelegramPublisher(self.bot_manager)
+        self.cross_promoter = cross_promoter.CrossPromoter(self.config, self.analyzer, self.bot_manager)
 
     async def run_cycle(self):
         """
@@ -66,10 +68,15 @@ class NewsFeedApp:
 
                 should_mark_seen = False
 
-                # Check criteria (Relevance OR Importance OR Urgency)
-                is_relevant_enough = scores.relevance_score >= self.config.min_relevance_score
-                is_important_enough = scores.importance_score >= self.config.min_importance_score
-                is_urgent_enough = scores.urgency_score >= self.config.min_urgency_score
+                # Use theme-level minimum scores if defined, otherwise fall back to global defaults
+                min_relevance = theme.min_relevance_score if theme.min_relevance_score is not None else self.config.min_relevance_score
+                min_importance = theme.min_importance_score if theme.min_importance_score is not None else self.config.min_importance_score
+                min_urgency = theme.min_urgency_score if theme.min_urgency_score is not None else self.config.min_urgency_score
+
+                # Check criteria (Relevance AND (Importance OR Urgency))
+                is_relevant_enough = scores.relevance_score >= min_relevance
+                is_important_enough = scores.importance_score >= min_importance
+                is_urgent_enough = scores.urgency_score >= min_urgency
 
                 # 3. Decision and Logging
                 is_selected = is_relevant_enough and (is_important_enough or is_urgent_enough)
@@ -101,7 +108,13 @@ class NewsFeedApp:
                         summaries = self.analyzer.analyze_summaries(article, theme.language)
 
                         if summaries:
-                            # Store summaries in Article
+                            if not summaries.get('is_valid_news', True):
+                                rejection_reason = summaries.get('rejection_reason', 'No reason provided')
+                                logger.info(f"[REJECTED] Article rejected during summary generation: {rejection_reason}")
+                                should_mark_seen = True
+                                scores.reasoning = f"REJECTED: {rejection_reason}" # update the reason in the database to reflect why it was rejected
+                                continue
+
                             article.short_summary = summaries['short_summary']
                             article.long_summary = summaries['long_summary']
                             logger.debug(f"[SUMMARIES] {article.title}\nShort: {article.short_summary}\nLong: {article.long_summary}")
@@ -112,7 +125,7 @@ class NewsFeedApp:
 
                         # 7. Publish
                         try:
-                            await self.publisher.publish(article, scores, theme.channel_id)
+                            await self.publisher.publish(article, scores, theme.channel_id, include_image=theme.include_image)
                             self.fetcher.mark_published(article)
                             should_mark_seen = True
                         except Exception as e:
@@ -160,16 +173,16 @@ class NewsFeedApp:
             lambda: self.db.purge_old_entries(days=30)
         )
 
-        # Statistics export (Every day at 03:05 AM)
+        # Statistics export
         os.makedirs("logs", exist_ok=True)
-        #schedule.every().day.at("03:05").do(
-        schedule.every(120).minutes.do(
+        schedule.every().day.at("03:05").do(
+        # schedule.every(180).minutes.do(
             lambda: self.db.export_statistics(f"logs/statistics_{datetime.now().strftime('%Y-%m-%d')}.txt")
         )
 
-        # Cross-promotion schedule (Every Monday at 09:00 AM)
+        # Cross-promotion schedule
         #schedule.every().day.at("09:00").do(
-        schedule.every(120).minutes.do(
+        schedule.every(180).minutes.do(
             lambda: asyncio.run(self.cross_promoter.promote_channels())
         )
 

@@ -23,13 +23,15 @@ min_urgency_score: 8
 themes:
   - name: "Breaking News"
     channel_id: "-1001234567890" # Example Channel ID
+    language: "Portuguese (PT-PT)"
     feeds:
       - "http://feeds.bbci.co.uk/news/world/rss.xml"
       - "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"
     prompt_focus: >
-      breaking news, major world events, high urgency. 
-      FOCUS on events with global impact. 
+      breaking news, major world events, high urgency.
+      FOCUS on events with global impact.
       REJECT local stories or minor updates.
+    include_image: false # Default is false, relying on web page preview
 
   - name: "Science"
     channel_id: "-1000987654321"
@@ -37,7 +39,7 @@ themes:
       - "https://www.sciencedaily.com/rss/top/science.xml"
       - "https://rss.nytimes.com/services/xml/rss/nyt/Science.xml"
     prompt_focus: >
-      scientific discoveries, peer-reviewed research, space exploration. 
+      scientific discoveries, peer-reviewed research, space exploration.
       REJECT pop-science fluff or speculative articles.
 
   - name: "Tech"
@@ -46,5 +48,5 @@ themes:
       - "https://feeds.feedburner.com/TechCrunch/"
       - "https://www.theverge.com/rss/index.xml"
     prompt_focus: >
-      cutting-edge technology, major software/hardware releases, AI breakthroughs. 
+      cutting-edge technology, major software/hardware releases, AI breakthroughs.
       STRICTLY REJECT sales, deals, or promotional content.

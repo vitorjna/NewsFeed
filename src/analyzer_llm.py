@@ -1,6 +1,7 @@
 import json
 from openai import OpenAI
 from dataclasses import dataclass
+import datetime
 from typing import Optional, Dict
 from .utils import setup_logger, extract_json
 from .config import LLMConfig
@@ -17,8 +18,7 @@ class AnalysisResult:
 
 class NewsAnalyzer:
     def __init__(self, config: LLMConfig):
-        # We use the OpenAI client as it's compatible with most local providers
-        # like LM Studio and Ollama.
+        # We use the OpenAI client as it's compatible with most providers (local or cloud)
         self.llm_client = OpenAI(
             api_key=config.api_key,
             base_url=config.base_url
@@ -31,17 +31,25 @@ class NewsAnalyzer:
         """
         logger.info(f"Analyzing scores for article: {article.title}")
 
+        today_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+
         system_prompt = f"""
         You are a professional news editor and analyst.
         Your goal is to analyze news articles for a specific Telegram channel.
 
         Channel Focus: {prompt_focus}
+        Current Date: {today_str}
 
         Output must be strict JSON format with the following keys:
-        - relevance_score: int (1-10) - How well does this align with the specific channel focus? (1=Not at all, 10=Perfect match)
+        - reasoning: string (Brief analysis of why this fits or doesn't fit the channel focus)
+        - relevance_score: int (1-10) - How well does this align with the specific channel focus? (1=Irrelevant/Noise, 10=Perfect On-Topic Match)
         - importance_score: int (1-10) - How significant is this event globally or within its domain? (1=Trivia, 10=Historic/Major Impact)
-        - urgency_score: int (1-10) - Does this require immediate attention? (1=Evergreen/Slow, 10=Breaking/Immediate Action)
-        - reasoning: string (1 sentence for why you gave these scores)
+        - urgency_score: int (1-10) - Does this require immediate attention? (1=Old/Evergreen, 10=Breaking/Immediate Action)
+
+        Scoring Rules:
+        - If relevance is below 6, the article will likely be discarded. Be critical.
+        - Urgency should consider the Current Date vs the event date.
+        - Importance reflects the magnitude of the event, not just user interest.
 
         IMPORTANT: Response must be ONLY the JSON object. Do not include any explanations, greetings, or markdown markers outside the JSON.
         """
@@ -54,45 +62,48 @@ class NewsAnalyzer:
 
         # Gemini's OpenAI-compatible API often fails with 'system' role for some models (Gemma)
         if "google" in str(self.llm_client.base_url).lower():
-            messages = [
+            llm_message = [
                 {"role": "user", "content": f"{system_prompt}\n\nUSER REQUEST:\n{user_content}"}
             ]
 
         else:
-            messages = [
+            llm_message = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content}
             ]
 
-        try:
-            response = self.llm_client.chat.completions.create(
-                model=self.model,
-                messages=messages
-            )
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = self.llm_client.chat.completions.create(
+                    model=self.model,
+                    messages=llm_message
+                )
 
-            content = response.choices[0].message.content
-            if not content:
-                logger.warning(f"Empty response from LLM for {article.title} (possibly safety block)")
-                return None
+                content = response.choices[0].message.content
+                if not content:
+                    logger.warning(f"Empty response from LLM for {article.title} (possibly safety block) - Attempt {attempt + 1}")
+                    continue
 
-            content = extract_json(content)
-            data = json.loads(content)
+                content = extract_json(content)
+                data = json.loads(content)
 
-            return AnalysisResult(
-                relevance_score=data.get('relevance_score', 0),
-                importance_score=data.get('importance_score', 0),
-                urgency_score=data.get('urgency_score', 0),
-                reasoning=data.get('reasoning', '')
-            )
+                return AnalysisResult(
+                    relevance_score=data.get('relevance_score', 0),
+                    importance_score=data.get('importance_score', 0),
+                    urgency_score=data.get('urgency_score', 0),
+                    reasoning=data.get('reasoning', '')
+                )
 
-        except Exception as e:
-            logger.error(f"Error analyzing scores for {article.title}: {e}")
-            return None
+            except Exception as e:
+                logger.error(f"Error analyzing scores for {article.title} (Attempt {attempt + 1}): {e}")
+
+        return None
 
     def analyze_summaries(self, article: Article, language: Optional[str] = None) -> Optional[Dict[str, str]]:
         """
         Generates short and long summaries for an article.
-        Returns a dictionary with 'short_summary' and 'long_summary'.
+        Returns a dictionary with 'short_summary', 'long_summary', and validity flags.
         """
         logger.info(f"Generating summaries for article: {article.title}")
 
@@ -104,14 +115,25 @@ class NewsAnalyzer:
 
         CRITICAL: {lang_instruction}
 
-        Output must be strict JSON format with the following keys:
-        - short_summary: string (1-2 sentences, engaging, suitable for a quick notification.)
-        - long_summary: string (2-3 paragraphs. Each paragraph MUST start with an appropriate emoji related to its content. The summary should be concise, covering the main points of the article.)
+        First, analyze if the content is a valid individual news article.
+        REJECT if:
+        - It is video-only content without substantial text.
+        - It is a newsletter or a "digest" summarizing multiple different unrelated stories.
+        - It is a generic landing page, login page, or error page.
+        - It is a promotional or marketing piece masquerading as news.
+        - The content is too short to generate a meaningful summary.
 
-        FORMATTING RULES:
+        Output must be strict JSON format with the following keys:
+        - is_valid_news: boolean (true if valid news article, false if rejected based on criteria above)
+        - rejection_reason: string (if is_valid_news is false, explain why concisely. Otherwise null or empty string)
+        - short_summary: string (1-2 sentences, engaging but factual. Suitable for a notification. No emojis)
+        - long_summary: string (2-3 paragraphs. Each paragraph MUST start with an appropriate emoji. Focus on the "Who, What, Where, Why" for the content. Do not use headings, only the emoji. Leave an empty line between paragraphs.)
+
+        Formatting:
         - DO NOT USE MARKDOWN (no **, __, [], etc.).
-        - Use HTML tags only for emphasis: <b>bold</b>, <i>italic</i>, <u>underline</u>.
-        - If the text contains characters that might break HTML (like < or > that are not part of tags), escape them or ensure they don't break the structure.
+        - Use HTML tags ONLY for specific emphasis: <b>bold</b>, <i>italic</i>.
+        - Ensure all key entities (names, places, organizations) are preserved accurately.
+        - Do not hallucinate facts not present in the source text.
 
         IMPORTANT: Response must be ONLY the JSON object. Do not include any explanations, greetings, or markdown markers outside the JSON.
         """
@@ -125,36 +147,41 @@ class NewsAnalyzer:
         {content_type}: {content_to_summarize}
         """
 
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content}
-        ]
-
         # Gemini's OpenAI-compatible API often fails with 'system' role for some models (Gemma)
         if "google" in str(self.llm_client.base_url).lower():
-            messages = [
+            llm_message = [
                 {"role": "user", "content": f"{system_prompt}\n\nUSER REQUEST:\n{user_content}"}
             ]
+        else:
+            llm_message = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content}
+            ]
 
-        try:
-            response = self.llm_client.chat.completions.create(
-                model=self.model,
-                messages=messages
-            )
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = self.llm_client.chat.completions.create(
+                    model=self.model,
+                    messages=llm_message
+                )
 
-            content = response.choices[0].message.content
-            if not content:
-                logger.warning(f"Empty response from LLM summaries for {article.title} (possibly safety block)")
-                return None
+                content = response.choices[0].message.content
+                if not content:
+                    logger.warning(f"Empty response from LLM summaries for {article.title} (possibly safety block) - Attempt {attempt + 1}")
+                    continue
 
-            content = extract_json(content)
-            data = json.loads(content)
+                content = extract_json(content)
+                data = json.loads(content)
 
-            return {
-                'short_summary': data.get('short_summary', ''),
-                'long_summary': data.get('long_summary', '')
-            }
+                return {
+                    'short_summary': data.get('short_summary', ''),
+                    'long_summary': data.get('long_summary', ''),
+                    'is_valid_news': data.get('is_valid_news', True),
+                    'rejection_reason': data.get('rejection_reason', '')
+                }
 
-        except Exception as e:
-            logger.error(f"Error generating summaries for {article.title}: {e}")
-            return None
+            except Exception as e:
+                logger.error(f"Error generating summaries for {article.title} (Attempt {attempt + 1}): {e}")
+
+        return None

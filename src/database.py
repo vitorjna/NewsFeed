@@ -1,6 +1,5 @@
 import sqlite3
 import os
-import logging
 from datetime import datetime, timedelta
 from typing import List, Optional
 from .utils import setup_logger
@@ -47,19 +46,6 @@ class DatabaseManager:
                 published_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-
-        # Add columns if they don't exist (for existing databases)
-        existing_seen_cols = {row[1] for row in c.execute("PRAGMA table_info(seen_urls)").fetchall()}
-        if 'feed_name' not in existing_seen_cols:
-            c.execute("ALTER TABLE seen_urls ADD COLUMN feed_name TEXT")
-        if 'feed_url' not in existing_seen_cols:
-            c.execute("ALTER TABLE seen_urls ADD COLUMN feed_url TEXT")
-
-        existing_pub_cols = {row[1] for row in c.execute("PRAGMA table_info(published_articles)").fetchall()}
-        if 'feed_name' not in existing_pub_cols:
-            c.execute("ALTER TABLE published_articles ADD COLUMN feed_name TEXT")
-        if 'feed_url' not in existing_pub_cols:
-            c.execute("ALTER TABLE published_articles ADD COLUMN feed_url TEXT")
 
         conn.commit()
         conn.close()
@@ -167,6 +153,7 @@ class DatabaseManager:
                         s.feed_name,
                         COUNT(s.url) as total_seen,
                         COUNT(p.url) as total_published,
+                        COUNT(p.url) * 100.0 / COUNT(s.url) as publish_rate,
                         AVG(s.relevance_score) as avg_relevance,
                         AVG(s.importance_score) as avg_importance,
                         AVG(s.urgency_score) as avg_urgency,
@@ -194,13 +181,13 @@ class DatabaseManager:
                         return
 
                     current_theme = None
-                    for theme, feed, seen, pub, avg_r, avg_i, avg_u, last_pub in rows:
+                    for theme, feed, seen, pub, rate, avg_r, avg_i, avg_u, last_pub in rows:
                         if theme != current_theme:
                             if current_theme is not None:
                                 f.write("-" * 100 + "\n")
                             f.write(f"\nTHEME: {theme}\n")
                             f.write("-" * 100 + "\n")
-                            f.write(f"{'Feed Name':<40} | {'Seen':<5} | {'Pub':<5} | {'Avg R':<5} | {'Avg I':<5} | {'Avg U':<5} | {'Last Pub':<16}\n")
+                            f.write(f"{'Feed Name':<40} | {'Seen':<5} | {'Pub':<5} | {'Rate':<5} | {'Avg R':<5} | {'Avg I':<5} | {'Avg U':<5} | {'Last Pub':<16}\n")
                             f.write("-" * 100 + "\n")
                             current_theme = theme
 
@@ -210,7 +197,7 @@ class DatabaseManager:
                         avg_u = avg_u if avg_u is not None else 0.0
                         last_pub_str = last_pub[:16] if last_pub else "Never"
 
-                        f.write(f"{feed_str:<40} | {seen:<5} | {pub:<5} | {avg_r:<5.2f} | {avg_i:<5.2f} | {avg_u:<5.2f} | {last_pub_str:<16}\n")
+                        f.write(f"{feed_str:<40} | {seen:<5} | {pub:<5} | {rate:<5.2f}% | {avg_r:<5.2f} | {avg_i:<5.2f} | {avg_u:<5.2f} | {last_pub_str:<16}\n")
                     f.write("-" * 100 + "\n\n")  # closing separator after last theme
 
                 write_table("DAILY STATISTICS (Last 24 Hours)", daily_rows)

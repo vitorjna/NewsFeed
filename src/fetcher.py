@@ -4,7 +4,6 @@ import calendar
 from typing import List, Optional
 from dataclasses import dataclass
 from .utils import setup_logger, clean_html
-
 from .database import DatabaseManager
 
 logger = setup_logger("FeedFetcher")
@@ -27,10 +26,6 @@ class FeedFetcher:
     def __init__(self, db: DatabaseManager):
         self.db = db
 
-    def is_seen(self, url: str) -> bool:
-        """Check if URL has been seen before."""
-        return self.db.is_seen(url)
-
     def mark_seen(self, url: str, theme: str, feed_name: Optional[str] = None, feed_url: Optional[str] = None, relevance: Optional[int] = None, importance: Optional[int] = None, urgency: Optional[int] = None, reasoning: Optional[str] = None):
         """Mark URL as seen, optionally storing scores."""
         self.db.mark_seen(url, theme, feed_name, feed_url, relevance, importance, urgency, reasoning)
@@ -39,7 +34,7 @@ class FeedFetcher:
         """Mark article as published in the database."""
         self.db.mark_published(article)
 
-    def is_similar_already_published(self, article: Article, title_threshold: float = 0.8, summary_threshold: float = 0.6, days: int = 2) -> Optional[str]:
+    def is_similar_already_published(self, article: Article, title_threshold: float = 0.65, summary_threshold: float = 0.5, days: int = 1) -> Optional[str]:
         """
         Check if an article with a similar title or summary was published in the same theme
         within the last `days`. Returns the title of the similar article if found.
@@ -54,7 +49,7 @@ class FeedFetcher:
                 title_sim = SequenceMatcher(None, article.title.lower(), existing_title.lower()).ratio()
 
                 if title_sim >= title_threshold:
-                    logger.debug(f"Similarity match by TITLE:\n New: '{article.title}'\n Matching: '{existing_title}'\n Score: {title_sim:.2f} >= {title_threshold}")
+                    logger.info(f"Similarity match by TITLE: Score: {title_sim:.2f} >= {title_threshold}, New: '{article.title}', Matching: '{existing_title}'")
                     return existing_title
 
                 # 2. Check summary similarity (if title didn't match and both have summaries)
@@ -64,7 +59,7 @@ class FeedFetcher:
                     summary_sim = SequenceMatcher(None, article.summary.lower(), cleaned_existing_summary.lower()).ratio()
 
                     if summary_sim >= summary_threshold:
-                        logger.debug(f"Similarity match by SUMMARY for '{article.title}':\n New Summary: '{article.summary[:300]}...'\n Matching Summary: '{cleaned_existing_summary[:300]}...'\n Score: {summary_sim:.2f} >= {summary_threshold}")
+                        logger.info(f"Similarity match by SUMMARY for '{article.title}': Score: {summary_sim:.2f} >= {summary_threshold}, New Summary: '{article.summary[:300]}...', Matching Summary: '{cleaned_existing_summary[:300]}...'")
                         return existing_title
 
             return None
@@ -134,7 +129,7 @@ class FeedFetcher:
                         continue
 
                     # Deduplication check
-                    if self.is_seen(link):
+                    if self.db.is_seen(link):
                         continue
 
                     # Age check (ignore everything older than X hours)
