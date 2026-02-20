@@ -92,7 +92,7 @@ class DatabaseManager:
             c = conn.cursor()
             c.execute(
                 'INSERT INTO published_articles (title, url, theme, feed_name, feed_url, short_summary, rss_summary) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                (article.title, article.link, article.theme, article.source_name, article.source_feed, article.short_summary, article.summary)
+                (article.title, article.link, article.theme, article.source_name, article.source_feed, article.short_summary, article.rss_summary)
             )
             conn.commit()
             conn.close()

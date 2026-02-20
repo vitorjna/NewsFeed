@@ -12,7 +12,7 @@ logger = setup_logger("FeedFetcher")
 class Article:
     title: str
     link: str
-    summary: str
+    rss_summary: str
     published: str
     source_feed: str
     source_name: str
@@ -34,7 +34,7 @@ class FeedFetcher:
         """Mark article as published in the database."""
         self.db.mark_published(article)
 
-    def is_similar_already_published(self, article: Article, title_threshold: float = 0.65, summary_threshold: float = 0.5, days: int = 1) -> Optional[str]:
+    def is_similar_already_published(self, article: Article, title_threshold: float = 0.6, summary_threshold: float = 0.5, days: int = 1) -> Optional[str]:
         """
         Check if an article with a similar title or summary was published in the same theme
         within the last `days`. Returns the title of the similar article if found.
@@ -43,6 +43,11 @@ class FeedFetcher:
 
         try:
             recent_articles = self.db.get_recent_published(article.theme, days)
+            # store highest similarity found by title and summary
+            highest_title_similarity = 0
+            highest_summary_similarity = 0
+            matching_title_article = None
+            matching_summary_article = None
 
             for existing_title, existing_summary in recent_articles:
                 # 1. Check title similarity first
@@ -52,15 +57,28 @@ class FeedFetcher:
                     logger.info(f"Similarity match by TITLE: Score: {title_sim:.2f} >= {title_threshold}, New: '{article.title}', Matching: '{existing_title}'")
                     return existing_title
 
+                elif title_sim > highest_title_similarity:
+                    highest_title_similarity = title_sim
+                    matching_title_article = existing_title
+
                 # 2. Check summary similarity (if title didn't match and both have summaries)
-                if article.summary and existing_summary:
+                if article.rss_summary and existing_summary:
                     # Clean the existing summary in case it was stored with HTML previously
                     cleaned_existing_summary = clean_html(existing_summary)
-                    summary_sim = SequenceMatcher(None, article.summary.lower(), cleaned_existing_summary.lower()).ratio()
+                    summary_sim = SequenceMatcher(None, article.rss_summary.lower(), cleaned_existing_summary.lower()).ratio()
 
                     if summary_sim >= summary_threshold:
-                        logger.info(f"Similarity match by SUMMARY for '{article.title}': Score: {summary_sim:.2f} >= {summary_threshold}, New Summary: '{article.summary[:300]}...', Matching Summary: '{cleaned_existing_summary[:300]}...'")
+                        logger.info(f"Similarity match by SUMMARY for '{article.title}': Score: {summary_sim:.2f} >= {summary_threshold}, New Summary: '{article.rss_summary[:300]}...', Matching Summary: '{cleaned_existing_summary[:300]}...'")
                         return existing_title
+
+                    elif summary_sim > highest_summary_similarity:
+                        highest_summary_similarity = summary_sim
+                        matching_summary_article = existing_title
+
+            if matching_title_article:
+                logger.debug(f"No exact match for '{article.title}'. Highest title similarity: {highest_title_similarity:.2f} with '{matching_title_article}'")
+            if matching_summary_article:
+                logger.debug(f"No exact match for '{article.title}'. Highest summary similarity: {highest_summary_similarity:.2f} with '{matching_summary_article}'")
 
             return None
         except Exception as e:
@@ -157,14 +175,14 @@ class FeedFetcher:
 
                     title = clean_html(entry.get('title', 'No Title'))
                     # Prefer summary, fall back to description or empty
-                    summary = clean_html(entry.get('summary', entry.get('description', '')))
+                    rss_summary = clean_html(entry.get('summary', entry.get('description', '')))
                     published = entry.get('published', str(time.time()))
                     image_url = self._extract_image(entry)
 
                     article = Article(
                         title=title,
                         link=link,
-                        summary=summary,
+                        rss_summary=rss_summary,
                         published=published,
                         source_feed=feed_url,
                         source_name=source_name,

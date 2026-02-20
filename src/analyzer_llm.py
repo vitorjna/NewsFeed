@@ -34,31 +34,27 @@ class NewsAnalyzer:
         today_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
 
         system_prompt = f"""
-        You are a professional news editor and analyst.
-        Your goal is to analyze news articles for a specific Telegram channel.
+    You are a professional news editor and analyst.
+    Your goal is to analyze news articles for a specific Telegram channel.
 
-        Channel Focus: {prompt_focus}
-        Current Date: {today_str}
+    Channel Focus: {prompt_focus}
+    Current Date: {today_str}
 
-        Output must be strict JSON format with the following keys:
-        - reasoning: string (Brief analysis of why this fits or doesn't fit the channel focus)
-        - relevance_score: int (1-10) - How well does this align with the specific channel focus? (1=Irrelevant/Noise, 10=Perfect On-Topic Match)
-        - importance_score: int (1-10) - How significant is this event globally or within its domain? (1=Trivia, 10=Historic/Major Impact)
-        - urgency_score: int (1-10) - Does this require immediate attention? (1=Old/Evergreen, 10=Breaking/Immediate Action)
+    Output must be strict JSON format with the following keys:
+    - reasoning: string (Brief analysis of why this fits or doesn't fit the channel focus)
+    - relevance_score: int (1-10) - How well does this align with the specific channel focus? (1=Irrelevant/Noise, 10=Perfect On-Topic Match)
+    - importance_score: int (1-10) - How significant is this event globally or within its domain? (1=Trivia, 10=Historic/Major Impact)
+    - urgency_score: int (1-10) - Does this require immediate attention? (1=Old/Evergreen, 10=Breaking/Immediate Action)
 
-        Scoring Rules:
-        - If relevance is below 6, the article will likely be discarded. Be critical.
-        - Urgency should consider the Current Date vs the event date.
-        - Importance reflects the magnitude of the event, not just user interest.
+    Scoring Rules:
+    - If relevance is below 6, the article will likely be discarded. Be critical.
+    - Urgency should consider the Current Date vs the event date.
+    - Importance reflects the magnitude of the event, not just user interest.
 
-        IMPORTANT: Response must be ONLY the JSON object. Do not include any explanations, greetings, or markdown markers outside the JSON.
+    IMPORTANT: Response must be ONLY the JSON object. Do not include any explanations, greetings, or markdown markers outside the JSON.
         """
 
-        user_content = f"""
-        Title: {article.title}
-        Link: {article.link}
-        Content/Summary: {article.summary}
-        """
+        user_content = f"Title: {article.title}\nLink: {article.link}\nContent/Summary: {article.rss_summary}"
 
         # Gemini's OpenAI-compatible API often fails with 'system' role for some models (Gemma)
         if "google" in str(self.llm_client.base_url).lower():
@@ -82,11 +78,11 @@ class NewsAnalyzer:
 
                 content = response.choices[0].message.content
                 if not content:
-                    logger.warning(f"Empty response from LLM for {article.title} (possibly safety block) - Attempt {attempt + 1}")
+                    logger.warning(f"Empty response from LLM for '{article.title}' (possibly safety block) - attempt {attempt + 1}")
                     continue
 
                 content = extract_json(content)
-                data = json.loads(content)
+                data = json.loads(content, strict=False)
 
                 return AnalysisResult(
                     relevance_score=data.get('relevance_score', 0),
@@ -96,7 +92,7 @@ class NewsAnalyzer:
                 )
 
             except Exception as e:
-                logger.error(f"Error analyzing scores for {article.title} (Attempt {attempt + 1}): {e}")
+                logger.error(f"Error analyzing scores for '{article.title}' (attempt {attempt + 1}): {e}")
 
         return None
 
@@ -110,42 +106,46 @@ class NewsAnalyzer:
         lang_instruction = f"The summaries MUST be written in {language}." if language else "The summaries MUST be written in the same language as the news article provided."
 
         system_prompt = f"""
-        You are a professional news editor.
-        Your goal is to summarize news articles for a Telegram channel.
+    You are a professional news editor.
+    Your goal is to summarize news articles for a Telegram channel.
 
-        CRITICAL: {lang_instruction}
+    CRITICAL: {lang_instruction}
 
-        First, analyze if the content is a valid individual news article.
-        REJECT if:
-        - It is video-only content without substantial text.
-        - It is a newsletter or a "digest" summarizing multiple different unrelated stories.
-        - It is a generic landing page, login page, or error page.
-        - It is a promotional or marketing piece masquerading as news.
-        - The content is too short to generate a meaningful summary.
+    First, analyze if the content is a valid individual news article.
+    REJECT if:
+    - It is video-only content without substantial text.
+    - It is a newsletter or a "digest" summarizing multiple different unrelated stories.
+    - It is a generic landing page, login page, or error page.
+    - It is a promotional or marketing piece masquerading as news.
+    - The content is too short to generate a meaningful summary.
 
-        Output must be strict JSON format with the following keys:
-        - is_valid_news: boolean (true if valid news article, false if rejected based on criteria above)
-        - rejection_reason: string (if is_valid_news is false, explain why concisely. Otherwise null or empty string)
-        - short_summary: string (1-2 sentences, engaging but factual. Suitable for a notification. No emojis)
-        - long_summary: string (2-3 paragraphs. Each paragraph MUST start with an appropriate emoji. Focus on the "Who, What, Where, Why" for the content. Do not use headings, only the emoji. Leave an empty line between paragraphs.)
+    Output must be strict JSON format with the following keys:
+    - is_valid_news: boolean (true if valid news article, false if rejected based on criteria above)
+    - rejection_reason: string (if is_valid_news is false, explain why concisely. Otherwise null or empty string)
+    - short_summary: string (1-2 sentences, engaging but factual. Suitable for a notification. No emojis)
+    - long_summary: string (2-3 paragraphs. Each paragraph MUST start with an appropriate emoji. Focus on the "Who, What, Where, Why" for the content. Do not use headings, only the emoji. Leave an empty line between paragraphs.)
 
-        Formatting:
-        - DO NOT USE MARKDOWN (no **, __, [], etc.).
-        - Use HTML tags ONLY for specific emphasis: <b>bold</b>, <i>italic</i>.
-        - Ensure all key entities (names, places, organizations) are preserved accurately.
-        - Do not hallucinate facts not present in the source text.
+    Formatting:
+    - DO NOT USE MARKDOWN (no **, __, [], etc.).
+    - Use HTML tags ONLY for specific emphasis: <b>bold</b>, <i>italic</i>.
+    - Ensure all key entities (names, places, organizations) are preserved accurately.
+    - Do not hallucinate facts not present in the source text.
 
-        IMPORTANT: Response must be ONLY the JSON object. Do not include any explanations, greetings, or markdown markers outside the JSON.
+    IMPORTANT: Response must be ONLY the JSON object. Do not include any explanations, greetings, or markdown markers outside the JSON.
         """
 
-        content_to_summarize = article.full_text if article.full_text else article.summary
+        content_to_summarize = article.full_text if article.full_text else article.rss_summary
+
+        if not content_to_summarize or len(content_to_summarize) < 10:
+            logger.warning(f"No content available for article: {article.title}")
+            return {
+                'is_valid_news': False,
+                'rejection_reason': 'No content available'
+            }
+
         content_type = "Full Article Text" if article.full_text else "RSS Summary"
 
-        user_content = f"""
-        Title: {article.title}
-        Link: {article.link}
-        {content_type}: {content_to_summarize}
-        """
+        user_content = f"Title: {article.title}\nLink: {article.link}\n{content_type}: {content_to_summarize}"
 
         # Gemini's OpenAI-compatible API often fails with 'system' role for some models (Gemma)
         if "google" in str(self.llm_client.base_url).lower():
@@ -158,8 +158,8 @@ class NewsAnalyzer:
                 {"role": "user", "content": user_content}
             ]
 
-        max_retries = 3
-        for attempt in range(max_retries):
+        max_retries = 2
+        for attempt in range(1, max_retries + 1):
             try:
                 response = self.llm_client.chat.completions.create(
                     model=self.model,
@@ -168,11 +168,11 @@ class NewsAnalyzer:
 
                 content = response.choices[0].message.content
                 if not content:
-                    logger.warning(f"Empty response from LLM summaries for {article.title} (possibly safety block) - Attempt {attempt + 1}")
+                    logger.warning(f"Empty response from LLM summaries for '{article.title}' (possibly safety block) - attempt {attempt}")
                     continue
 
                 content = extract_json(content)
-                data = json.loads(content)
+                data = json.loads(content, strict=False) # allow non-strict JSON parsing, in case the LLM doesn't follow the instructions and returns actual line breaks instead of \n
 
                 return {
                     'short_summary': data.get('short_summary', ''),
@@ -182,6 +182,8 @@ class NewsAnalyzer:
                 }
 
             except Exception as e:
-                logger.error(f"Error generating summaries for {article.title} (Attempt {attempt + 1}): {e}")
+                logger.error(f"Error generating summaries for '{article.title}' (attempt {attempt}): {e}")
+                # also log the article content that caused the exception
+                logger.debug(f"Error generating summaries: {llm_message}")
 
         return None

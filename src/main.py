@@ -18,6 +18,7 @@ logger = setup_logger("Main")
 class NewsFeedApp:
     def __init__(self, config_path: str = "config/config.yaml"):
         from . import analyzer_llm, fetcher, publisher, config as config_mod, cross_promoter, database
+        self._is_running_cycle = False
         self.config = load_config(config_path)
 
         if self.config.debug:
@@ -42,100 +43,105 @@ class NewsFeedApp:
         """
         Runs one cycle of fetching, analyzing, and publishing.
         """
-        logger.info("Starting update cycle")
+        if self._is_running_cycle:
+            logger.warning("Previous update cycle still running, skipping this run.")
+            return
 
-        for theme in self.config.themes:
-            logger.info(f"Processing theme: {theme.name}")
+        self._is_running_cycle = True
+        try:
+            logger.info("Starting update cycle")
+            cycle_start_time = time.time()
 
-            # 1. Fetch
-            new_articles = self.fetcher.fetch_feeds(
-                theme.feeds,
-                theme.name,
-                max_age_hours=self.config.max_article_age_hours
-            )
+            for theme in self.config.themes:
+                logger.info(f"Processing theme: {theme.name}")
 
-            for article in new_articles:
-                # Add a small delay to respect rate limits (especially for Gemini free tier)
-                if self.config.llm.base_url and "google" in self.config.llm.base_url.lower():
-                    await asyncio.sleep(2) # 30 RPM limit = 2s per request. We do 2 calls per article usually.
-
-                # 2. Analyze Scores first
-                scores = self.analyzer.analyze_scores(article, theme.prompt_focus)
-
-                if not scores:
-                    logger.warning(f"Score analysis failed for {article.title}. Skipping marking as seen to retry later.")
-                    continue
-
-                should_mark_seen = False
-
-                # Use theme-level minimum scores if defined, otherwise fall back to global defaults
-                min_relevance = theme.min_relevance_score if theme.min_relevance_score is not None else self.config.min_relevance_score
-                min_importance = theme.min_importance_score if theme.min_importance_score is not None else self.config.min_importance_score
-                min_urgency = theme.min_urgency_score if theme.min_urgency_score is not None else self.config.min_urgency_score
-
-                # Check criteria (Relevance AND (Importance OR Urgency))
-                is_relevant_enough = scores.relevance_score >= min_relevance
-                is_important_enough = scores.importance_score >= min_importance
-                is_urgent_enough = scores.urgency_score >= min_urgency
-
-                # 3. Decision and Logging
-                is_selected = is_relevant_enough and (is_important_enough or is_urgent_enough)
-                status = "SELECTED" if is_selected else "SKIPPED"
-
-                logger.info(
-                    f"[ANALYSIS] {status}: Scores: R:{scores.relevance_score}, I:{scores.importance_score}, U:{scores.urgency_score} | "
-                    f"{article.title} | "
-                    f"Reasoning: {scores.reasoning}"
+                # 1. Fetch
+                new_articles = self.fetcher.fetch_feeds(
+                    theme.feeds,
+                    theme.name,
+                    max_age_hours=self.config.max_article_age_hours
                 )
 
-                if is_selected:
-                    # 4. Similarity Check
-                    similar_title = self.fetcher.is_similar_already_published(article)
-                    if similar_title:
-                        logger.info(f"[SKIP] Similar article already published: '{similar_title}'")
-                        should_mark_seen = True
+                for article in new_articles:
+                    # Add a small delay to respect rate limits (especially for Gemini free tier)
+                    if self.config.llm.base_url and "google" in self.config.llm.base_url.lower():
+                        await asyncio.sleep(2) # 30 RPM limit = 2s per request. We do 2 calls per article usually.
 
-                    else:
-                        # 5. Fetch full text for better summaries
-                        full_text = self.fetcher.fetch_full_text(article.link)
-                        if full_text:
-                            article.full_text = full_text
-                            logger.info(f"[FULL-TEXT] Extracted full text for {article.title} ({len(full_text)} characters)")
+                    logger.info(f"Analyzing article: {article.title[:50]}... | Source: {article.source_name[:30]}...")
+
+                    # 2. Analyze Scores first
+                    scores = self.analyzer.analyze_scores(article, theme.prompt_focus)
+
+                    if not scores:
+                        logger.warning(f"Score analysis failed for '{article.title}'. Skipping marking as seen to retry later.")
+                        continue
+
+                    # Use theme-level minimum scores if defined, otherwise fall back to global defaults
+                    min_relevance = theme.min_relevance_score if theme.min_relevance_score is not None else self.config.min_relevance_score
+                    min_importance = theme.min_importance_score if theme.min_importance_score is not None else self.config.min_importance_score
+                    min_urgency = theme.min_urgency_score if theme.min_urgency_score is not None else self.config.min_urgency_score
+
+                    # Check criteria (Relevance AND (Importance OR Urgency))
+                    is_relevant_enough = scores.relevance_score >= min_relevance
+                    is_important_enough = scores.importance_score >= min_importance
+                    is_urgent_enough = scores.urgency_score >= min_urgency
+
+                    # 3. Decision and Logging
+                    is_selected = is_relevant_enough and (is_important_enough or is_urgent_enough)
+                    status = "SELECTED" if is_selected else "SKIPPED"
+
+                    logger.info(
+                        f"[ANALYSIS] {status}: Scores: R:{scores.relevance_score}, I:{scores.importance_score}, U:{scores.urgency_score} | "
+                        f"{article.title} | "
+                        f"Reasoning: {scores.reasoning}"
+                    )
+
+                    should_publish = True
+
+                    if is_selected:
+                        # 4. Similarity Check
+                        similar_title = self.fetcher.is_similar_already_published(article)
+                        if similar_title:
+                            logger.info(f"[SKIP] Similar article already published: '{similar_title}'")
+
                         else:
-                            logger.warning(f"[FULL-TEXT] Failed or skipped full text extraction for {article.title}")
+                            # 5. Fetch full text for better summaries
+                            full_text = self.fetcher.fetch_full_text(article.link)
+                            if full_text:
+                                article.full_text = full_text
+                                logger.info(f"[FULL-TEXT] Extracted full text for '{article.title}' ({len(full_text)} characters)")
+                            else:
+                                logger.warning(f"[FULL-TEXT] Failed or skipped full text extraction for '{article.title}'")
 
-                        # 6. Analyze Summaries
-                        summaries = self.analyzer.analyze_summaries(article, theme.language)
+                            # 6. Analyze Summaries
+                            summaries = self.analyzer.analyze_summaries(article, theme.language)
 
-                        if summaries:
-                            if not summaries.get('is_valid_news', True):
-                                rejection_reason = summaries.get('rejection_reason', 'No reason provided')
-                                logger.info(f"[REJECTED] Article rejected during summary generation: {rejection_reason}")
-                                should_mark_seen = True
-                                scores.reasoning = f"REJECTED: {rejection_reason}" # update the reason in the database to reflect why it was rejected
-                                continue
+                            if summaries:
+                                if not summaries.get('is_valid_news', True):
+                                    rejection_reason = summaries.get('rejection_reason', 'No reason provided')
+                                    logger.info(f"[REJECTED] Article rejected during summary generation: {rejection_reason}")
+                                    scores.reasoning = f"REJECTED: {rejection_reason}" # update the reason in the database to reflect why it was rejected
+                                    should_publish = False # still mark as seen but don't publish
 
-                            article.short_summary = summaries['short_summary']
-                            article.long_summary = summaries['long_summary']
-                            logger.debug(f"[SUMMARIES] {article.title}\nShort: {article.short_summary}\nLong: {article.long_summary}")
-                        else:
-                            logger.warning(f"Summary generation failed for {article.title}. Defaulting to RSS summary.")
-                            article.short_summary = article.summary
-                            article.long_summary = None
+                                else:
+                                    article.short_summary = summaries['short_summary']
+                                    article.long_summary = summaries['long_summary']
+                                    logger.debug(f"[SUMMARIES] '{article.title}': {article.short_summary[:100]}... | {article.long_summary[:100]}...")
 
-                        # 7. Publish
-                        try:
-                            await self.publisher.publish(article, scores, theme.channel_id, include_image=theme.include_image)
-                            self.fetcher.mark_published(article)
-                            should_mark_seen = True
-                        except Exception as e:
-                            logger.error(f"Failed to publish {article.title}: {e}")
+                            else:
+                                logger.warning(f"Summary generation failed for '{article.title}'. Defaulting to RSS summary.")
+                                article.short_summary = article.rss_summary
+                                article.long_summary = None
 
-                else:
-                    # Not selected, mark as seen
-                    should_mark_seen = True
+                            # 7. Publish
+                            if should_publish:
+                                try:
+                                    await self.publisher.publish(article, scores, theme.channel_id, include_image=theme.include_image)
+                                    self.fetcher.mark_published(article)
+                                except Exception as e:
+                                    logger.error(f"Failed to publish '{article.title}': {e}")
+                                    continue # do not mark as seen, will try again on the next cycle
 
-                if should_mark_seen:
                     self.fetcher.mark_seen(
                         article.link,
                         theme.name,
@@ -147,7 +153,9 @@ class NewsFeedApp:
                         reasoning=scores.reasoning
                     )
 
-        logger.info("Update cycle completed")
+        finally:
+            self._is_running_cycle = False
+            logger.info(f"Update cycle completed in {(time.time() - cycle_start_time) / 60:.1f} minutes")
 
     def run(self):
         """
@@ -181,8 +189,8 @@ class NewsFeedApp:
         )
 
         # Cross-promotion schedule
-        #schedule.every().day.at("09:00").do(
-        schedule.every(180).minutes.do(
+        schedule.every().day.at("09:00").do(
+        #schedule.every(180).minutes.do(
             lambda: asyncio.run(self.cross_promoter.promote_channels())
         )
 

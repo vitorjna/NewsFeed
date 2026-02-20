@@ -68,20 +68,24 @@ class TelegramPublisher:
                         discussion_chat_id = chat_info.linked_chat_id
 
                         if discussion_chat_id:
-                            # 2. Retry up to 3 times to find the forwarded message
-                            max_attempts = 3
+                            # 2. Retry up to 5 times to find the forwarded message
+                            max_attempts = 5
+                            # Start with shorter sleep and increase slightly
+                            sleep_times = [3, 5, 7, 10, 15]
+
                             for attempt in range(1, max_attempts + 1):
-                                await asyncio.sleep(5)
+                                await asyncio.sleep(sleep_times[attempt-1])
 
                                 try:
                                     updates = await bot.get_updates(limit=20, offset=-20)
                                     for update in reversed(updates):
-                                        msg = update.message
+                                        msg = update.message or update.channel_post
+                                        # In discussion groups, it's often update.message
                                         if (msg and msg.chat.id == discussion_chat_id and
                                             msg.forward_from_chat and msg.forward_from_chat.id == chat_info.id and
                                             msg.forward_from_message_id == message.message_id):
                                             forwarded_message_id = msg.message_id
-                                            logger.info(f"Found forwarded message {forwarded_message_id} on attempt {attempt}")
+                                            logger.debug(f"Found forwarded message {forwarded_message_id} in discussion group on attempt {attempt}")
                                             break
 
                                 except Exception as update_err:
@@ -90,28 +94,26 @@ class TelegramPublisher:
                                 if forwarded_message_id:
                                     break
 
-                                if attempt == max_attempts:
-                                    logger.warning(f"Could not find forwarded message for {article.title} after {max_attempts} attempts")
+                        if not forwarded_message_id:
+                            logger.error(f"Could not find forwarded message in discussion group for '{article.title}' after attempts. Skipping long summary comment.")
+                        else:
+                            # 3. Post the summary comment
+                            formatted_long_summary = format_markdown_as_html(article.long_summary)
+                            comment_text = f"<b>{article.title}</b>\n\n{formatted_long_summary}"
+
+                            await bot.send_message(
+                                chat_id=discussion_chat_id,
+                                text=comment_text,
+                                reply_to_message_id=forwarded_message_id,
+                                parse_mode=ParseMode.HTML,
+                                disable_notification=True
+                            )
+                            logger.info(f"Successfully published '{article.title}' (Comment in discussion group {discussion_chat_id})")
 
                     except Exception as e:
-                        logger.error(f"Error determining discussion group: {e}")
-
-                    # 3. Post the summary comment
-                    formatted_long_summary = format_markdown_as_html(article.long_summary)
-                    comment_text = f"<b>{article.title}</b>\n\n{formatted_long_summary}"
-                    target_chat_id = discussion_chat_id if forwarded_message_id else channel_id
-                    reply_to = forwarded_message_id if forwarded_message_id else message.message_id
-
-                    await bot.send_message(
-                        chat_id=target_chat_id,
-                        text=comment_text,
-                        reply_to_message_id=reply_to,
-                        parse_mode=ParseMode.HTML,
-                        disable_notification=True
-                    )
-                    logger.info(f"Successfully published {article.title} (Comment in {target_chat_id})")
+                        logger.error(f"Error handling discussion group publication for '{article.title}': {e}")
                 else:
-                    logger.info(f"Successfully published {article.title} (No long summary)")
+                    logger.info(f"Successfully published '{article.title}' (No long summary generated)")
 
             except TelegramError as e:
-                logger.error(f"Failed to publish article {article.title}: {e}")
+                logger.error(f"Failed to publish article '{article.title}': {e}")
