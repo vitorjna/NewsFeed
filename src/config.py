@@ -60,18 +60,6 @@ def load_config(config_path: str = "config/config.yaml") -> AppConfig:
         )
 
         themes = []
-        for theme in raw_config['themes']:
-            themes.append(FeedConfig(
-                name=theme['name'],
-                channel_id=theme['channel_id'],
-                feeds=theme['feeds'],
-                prompt_focus=theme.get('prompt_focus', ""),
-                language=theme.get('language'),
-                min_relevance_score=theme.get('min_relevance_score'),
-                min_importance_score=theme.get('min_importance_score'),
-                min_urgency_score=theme.get('min_urgency_score'),
-                include_image=theme.get('include_image', False)
-            ))
 
         config = AppConfig(
             telegram_bot_token=raw_config['telegram_bot_token'],
@@ -80,11 +68,25 @@ def load_config(config_path: str = "config/config.yaml") -> AppConfig:
             max_article_age_hours=raw_config.get('max_article_age_hours', 8),
             database_path=raw_config.get('database_path', 'data/seen_urls.db'),
             min_relevance_score=raw_config.get('min_relevance_score', 8),
-            min_importance_score=raw_config.get('min_importance_score', 8),
-            min_urgency_score=raw_config.get('min_urgency_score', 8),
+            min_importance_score=raw_config.get('min_importance_score', 7),
+            min_urgency_score=raw_config.get('min_urgency_score', 7),
             themes=themes,
             debug=raw_config.get('debug', False)
         )
+
+        for theme in raw_config['themes']:
+            themes.append(FeedConfig(
+                name=theme['name'],
+                channel_id=theme['channel_id'],
+                feeds=theme['feeds'],
+                prompt_focus=theme.get('prompt_focus', ""),
+                language=theme.get('language'),
+                min_relevance_score=theme.get('min_relevance_score', config.min_relevance_score),
+                min_importance_score=theme.get('min_importance_score', config.min_importance_score),
+                min_urgency_score=theme.get('min_urgency_score', config.min_urgency_score),
+                include_image=theme.get('include_image', False)
+            ))
+
         logger.info("Configuration loaded successfully")
         return config
 

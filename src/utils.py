@@ -3,7 +3,7 @@ import sys
 import os
 import re
 import html
-from logging.handlers import RotatingFileHandler
+import logging.handlers
 
 def setup_logger(name: str = "NewsFeedApp", level=logging.INFO):
     """
@@ -27,7 +27,7 @@ def setup_logger(name: str = "NewsFeedApp", level=logging.INFO):
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
 
-        file_handler = RotatingFileHandler(
+        file_handler = logging.handlers.RotatingFileHandler(
             filename=os.path.join(log_dir, "app.log"),
             maxBytes=10 * 1024 * 1024, # 10MB
             backupCount=9, # 1 main file + 9 backups = 10 files total

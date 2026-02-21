@@ -54,7 +54,8 @@ class NewsAnalyzer:
     IMPORTANT: Response must be ONLY the JSON object. Do not include any explanations, greetings, or markdown markers outside the JSON.
         """
 
-        user_content = f"Title: {article.title}\nLink: {article.link}\nContent/Summary: {article.rss_summary}"
+        content_to_analyze = article.full_text if article.full_text else article.rss_summary
+        user_content = f"Title: {article.title}\nLink: {article.link}\nContent/Summary: {content_to_analyze}"
 
         # Gemini's OpenAI-compatible API often fails with 'system' role for some models (Gemma)
         if "google" in str(self.llm_client.base_url).lower():
@@ -159,6 +160,7 @@ class NewsAnalyzer:
             ]
 
         max_retries = 2
+        response_content = None
         for attempt in range(1, max_retries + 1):
             try:
                 response = self.llm_client.chat.completions.create(
@@ -166,13 +168,13 @@ class NewsAnalyzer:
                     messages=llm_message
                 )
 
-                content = response.choices[0].message.content
-                if not content:
+                response_content = response.choices[0].message.content
+                if not response_content:
                     logger.warning(f"Empty response from LLM summaries for '{article.title}' (possibly safety block) - attempt {attempt}")
                     continue
 
-                content = extract_json(content)
-                data = json.loads(content, strict=False) # allow non-strict JSON parsing, in case the LLM doesn't follow the instructions and returns actual line breaks instead of \n
+                response_content = extract_json(response_content)
+                data = json.loads(response_content, strict=False) # allow non-strict JSON parsing, in case the LLM doesn't follow the instructions and returns actual line breaks instead of \n
 
                 return {
                     'short_summary': data.get('short_summary', ''),
@@ -183,7 +185,6 @@ class NewsAnalyzer:
 
             except Exception as e:
                 logger.error(f"Error generating summaries for '{article.title}' (attempt {attempt}): {e}")
-                # also log the article content that caused the exception
-                logger.debug(f"Error generating summaries: {llm_message}")
+                logger.debug(f"Error generating summaries. Received content: {response_content}")
 
         return None

@@ -62,6 +62,10 @@ class NewsFeedApp:
                     max_age_hours=self.config.max_article_age_hours
                 )
 
+                if not new_articles:
+                    logger.info(f"No new articles found for theme: {theme.name}")
+                    continue
+
                 for article in new_articles:
                     # Add a small delay to respect rate limits (especially for Gemini free tier)
                     if self.config.llm.base_url and "google" in self.config.llm.base_url.lower():
@@ -69,25 +73,29 @@ class NewsFeedApp:
 
                     logger.info(f"Analyzing article: {article.title[:50]}... | Source: {article.source_name[:30]}...")
 
-                    # 2. Analyze Scores first
+                    # 2. Fetch full text if RSS summary is empty and then analyze scores
+                    if not article.rss_summary:
+                        full_text = self.fetcher.fetch_full_text(article.link)
+                        if full_text:
+                            article.full_text = full_text
+                            logger.info(f"[FULL-TEXT] Extracted full text for \'{article.title}\' ({len(full_text)} characters) due to empty RSS summary")
+                        else:
+                            logger.warning(f"[FULL-TEXT] Failed or skipped full text extraction for \'{article.title}\' with empty RSS summary")
+
                     scores = self.analyzer.analyze_scores(article, theme.prompt_focus)
+
 
                     if not scores:
                         logger.warning(f"Score analysis failed for '{article.title}'. Skipping marking as seen to retry later.")
                         continue
 
-                    # Use theme-level minimum scores if defined, otherwise fall back to global defaults
-                    min_relevance = theme.min_relevance_score if theme.min_relevance_score is not None else self.config.min_relevance_score
-                    min_importance = theme.min_importance_score if theme.min_importance_score is not None else self.config.min_importance_score
-                    min_urgency = theme.min_urgency_score if theme.min_urgency_score is not None else self.config.min_urgency_score
-
-                    # Check criteria (Relevance AND (Importance OR Urgency))
-                    is_relevant_enough = scores.relevance_score >= min_relevance
-                    is_important_enough = scores.importance_score >= min_importance
-                    is_urgent_enough = scores.urgency_score >= min_urgency
+                    # Theme scores were already set to use global scores if the score is not specified in theme
+                    is_relevant_enough = scores.relevance_score >= theme.min_relevance_score
+                    is_important_enough = scores.importance_score >= theme.min_importance_score
+                    is_urgent_enough = scores.urgency_score >= theme.min_urgency_score
 
                     # 3. Decision and Logging
-                    is_selected = is_relevant_enough and (is_important_enough or is_urgent_enough)
+                    is_selected = is_relevant_enough and is_important_enough and is_urgent_enough
                     status = "SELECTED" if is_selected else "SKIPPED"
 
                     logger.info(
@@ -106,12 +114,13 @@ class NewsFeedApp:
 
                         else:
                             # 5. Fetch full text for better summaries
-                            full_text = self.fetcher.fetch_full_text(article.link)
-                            if full_text:
-                                article.full_text = full_text
-                                logger.info(f"[FULL-TEXT] Extracted full text for '{article.title}' ({len(full_text)} characters)")
-                            else:
-                                logger.warning(f"[FULL-TEXT] Failed or skipped full text extraction for '{article.title}'")
+                            if not article.full_text:
+                                full_text = self.fetcher.fetch_full_text(article.link)
+                                if full_text:
+                                    article.full_text = full_text
+                                    logger.info(f"[FULL-TEXT] Extracted full text for '{article.title}' ({len(full_text)} characters)")
+                                else:
+                                    logger.warning(f"[FULL-TEXT] Failed or skipped full text extraction for '{article.title}'")
 
                             # 6. Analyze Summaries
                             summaries = self.analyzer.analyze_summaries(article, theme.language)
@@ -157,7 +166,24 @@ class NewsFeedApp:
             self._is_running_cycle = False
             logger.info(f"Update cycle completed in {(time.time() - cycle_start_time) / 60:.1f} minutes")
 
+    def _perform_daily_maintenance(self):
+        logger.debug("Performing daily maintenance tasks...")
+        self.db.purge_old_entries(days=30)
+        # find the log file handler and rollover to a new file
+        #for handler in logger.handlers:
+            #if isinstance(handler, logging.handlersRotatingFileHandler):
+                #handler.doRollover()
+                #break
+
+        logger.debug("Daily maintenance tasks completed.")
+
+
     def run(self):
+        #for handler in logger.handlers:
+            #if isinstance(handler, logging.handlersRotatingFileHandler):
+                #handler.doRollover()
+                #break
+
         """
         Starts the scheduler loop.
         """
@@ -177,20 +203,16 @@ class NewsFeedApp:
         )
 
         # Maintenance tasks (Every day at 03:00 AM)
-        schedule.every().day.at("03:00").do(
-            lambda: self.db.purge_old_entries(days=30)
-        )
+        schedule.every().day.at("03:00").do(self._perform_daily_maintenance)
 
         # Statistics export
         os.makedirs("logs", exist_ok=True)
         schedule.every().day.at("03:05").do(
-        # schedule.every(180).minutes.do(
             lambda: self.db.export_statistics(f"logs/statistics_{datetime.now().strftime('%Y-%m-%d')}.txt")
         )
 
         # Cross-promotion schedule
         schedule.every().day.at("09:00").do(
-        #schedule.every(180).minutes.do(
             lambda: asyncio.run(self.cross_promoter.promote_channels())
         )
 
