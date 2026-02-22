@@ -17,7 +17,7 @@ logger = setup_logger("Main")
 
 class NewsFeedApp:
     def __init__(self, config_path: str = "config/config.yaml"):
-        from . import analyzer_llm, fetcher, publisher, config as config_mod, cross_promoter, database
+        from . import analyzer_llm, article, fetcher, publisher, config as config_mod, cross_promoter, database
         self._is_running_cycle = False
         self.config = load_config(config_path)
 
@@ -25,6 +25,7 @@ class NewsFeedApp:
             level = logging.DEBUG
             logger.setLevel(level)
             analyzer_llm.logger.setLevel(level)
+            article.logger.setLevel(level)
             fetcher.logger.setLevel(level)
             publisher.logger.setLevel(level)
             config_mod.logger.setLevel(level)
@@ -36,7 +37,7 @@ class NewsFeedApp:
         self.fetcher = FeedFetcher(self.db)
         self.analyzer = NewsAnalyzer(self.config.llm)
         self.bot_manager = TelegramBotManager(self.config.telegram_bot_token)
-        self.publisher = TelegramPublisher(self.bot_manager)
+        self.publisher = TelegramPublisher()
         self.cross_promoter = cross_promoter.CrossPromoter(self.config, self.analyzer, self.bot_manager)
 
     async def run_cycle(self):
@@ -48,6 +49,9 @@ class NewsFeedApp:
             return
 
         self._is_running_cycle = True
+
+        bot = self.bot_manager.create_bot()
+
         try:
             logger.info("Starting update cycle")
             cycle_start_time = time.time()
@@ -69,98 +73,59 @@ class NewsFeedApp:
                 for article in new_articles:
                     # Add a small delay to respect rate limits (especially for Gemini free tier)
                     if self.config.llm.base_url and "google" in self.config.llm.base_url.lower():
-                        await asyncio.sleep(2) # 30 RPM limit = 2s per request. We do 2 calls per article usually.
+                        await asyncio.sleep(2) # 30 RPM limit = 2s per request.
 
-                    logger.info(f"Analyzing article: {article.title[:50]}... | Source: {article.source_name[:30]}...")
+                    logger.info(f"Processing article: {article.title[:50]}... | Source: {article.source_name[:30]}...")
 
-                    # 2. Fetch full text if RSS summary is empty and then analyze scores
-                    if not article.rss_summary:
-                        full_text = self.fetcher.fetch_full_text(article.link)
-                        if full_text:
-                            article.full_text = full_text
-                            logger.info(f"[FULL-TEXT] Extracted full text for \'{article.title}\' ({len(full_text)} characters) due to empty RSS summary")
-                        else:
-                            logger.warning(f"[FULL-TEXT] Failed or skipped full text extraction for \'{article.title}\' with empty RSS summary")
-
-                    scores = self.analyzer.analyze_scores(article, theme.prompt_focus)
-
+                    # 2. Analyze Scores
+                    scores = await asyncio.to_thread(article.analyze_scores, self.analyzer, self.fetcher, theme.prompt_focus)
 
                     if not scores:
                         logger.warning(f"Score analysis failed for '{article.title}'. Skipping marking as seen to retry later.")
                         continue
 
-                    # Theme scores were already set to use global scores if the score is not specified in theme
-                    is_relevant_enough = scores.relevance_score >= theme.min_relevance_score
-                    is_important_enough = scores.importance_score >= theme.min_importance_score
-                    is_urgent_enough = scores.urgency_score >= theme.min_urgency_score
-
-                    # 3. Decision and Logging
-                    is_selected = is_relevant_enough and is_important_enough and is_urgent_enough
+                    # Theme scores and decision
+                    is_selected = (
+                        scores.relevance_score >= theme.min_relevance_score and
+                        scores.importance_score >= theme.min_importance_score and
+                        scores.urgency_score >= theme.min_urgency_score
+                    )
                     status = "SELECTED" if is_selected else "SKIPPED"
 
                     logger.info(
                         f"[ANALYSIS] {status}: Scores: R:{scores.relevance_score}, I:{scores.importance_score}, U:{scores.urgency_score} | "
-                        f"{article.title} | "
-                        f"Reasoning: {scores.reasoning}"
+                        f"{article.title} | Reasoning: {scores.reasoning}"
                     )
 
                     should_publish = True
 
                     if is_selected:
-                        # 4. Similarity Check
+                        # 3. Similarity Check
                         similar_title = self.fetcher.is_similar_already_published(article)
                         if similar_title:
                             logger.info(f"[SKIP] Similar article already published: '{similar_title}'")
-
                         else:
-                            # 5. Fetch full text for better summaries
-                            if not article.full_text:
-                                full_text = self.fetcher.fetch_full_text(article.link)
-                                if full_text:
-                                    article.full_text = full_text
-                                    logger.info(f"[FULL-TEXT] Extracted full text for '{article.title}' ({len(full_text)} characters)")
-                                else:
-                                    logger.warning(f"[FULL-TEXT] Failed or skipped full text extraction for '{article.title}'")
+                            # 4. Analyze Summaries
+                            await asyncio.to_thread(article.generate_summaries, self.analyzer, self.fetcher, theme.language)
 
-                            # 6. Analyze Summaries
-                            summaries = self.analyzer.analyze_summaries(article, theme.language)
+                            if not article.is_valid_news:
+                                logger.info(f"[REJECTED] Article rejected: {article.reasoning}")
+                                should_publish = False
 
-                            if summaries:
-                                if not summaries.get('is_valid_news', True):
-                                    rejection_reason = summaries.get('rejection_reason', 'No reason provided')
-                                    logger.info(f"[REJECTED] Article rejected during summary generation: {rejection_reason}")
-                                    scores.reasoning = f"REJECTED: {rejection_reason}" # update the reason in the database to reflect why it was rejected
-                                    should_publish = False # still mark as seen but don't publish
-
-                                else:
-                                    article.short_summary = summaries['short_summary']
-                                    article.long_summary = summaries['long_summary']
-                                    logger.debug(f"[SUMMARIES] '{article.title}': {article.short_summary[:100]}... | {article.long_summary[:100]}...")
-
-                            else:
-                                logger.warning(f"Summary generation failed for '{article.title}'. Defaulting to RSS summary.")
-                                article.short_summary = article.rss_summary
-                                article.long_summary = None
-
-                            # 7. Publish
+                            # 5. Publish
                             if should_publish:
                                 try:
-                                    await self.publisher.publish(article, scores, theme.channel_id, include_image=theme.include_image)
-                                    self.fetcher.mark_published(article)
+                                    if not article.short_summary:
+                                        logger.warning(f"Summary generation failed for '{article.title}'. Defaulting to RSS summary.")
+                                        article.short_summary = article.rss_summary
+
+                                    await self.publisher.publish(bot, article, scores, theme.channel_id, include_image=theme.include_image)
+                                    article.mark_published(self.db)
                                 except Exception as e:
                                     logger.error(f"Failed to publish '{article.title}': {e}")
                                     continue # do not mark as seen, will try again on the next cycle
 
-                    self.fetcher.mark_seen(
-                        article.link,
-                        theme.name,
-                        feed_name=article.source_name,
-                        feed_url=article.source_feed,
-                        relevance=scores.relevance_score,
-                        importance=scores.importance_score,
-                        urgency=scores.urgency_score,
-                        reasoning=scores.reasoning
-                    )
+                    article.save(self.db)
 
         finally:
             self._is_running_cycle = False
@@ -168,7 +133,7 @@ class NewsFeedApp:
 
     def _perform_daily_maintenance(self):
         logger.debug("Performing daily maintenance tasks...")
-        self.db.purge_old_entries(days=30)
+        self.db.purge_old_entries(days_delete_unpublished=30, days_delete_published=90)
         # find the log file handler and rollover to a new file
         #for handler in logger.handlers:
             #if isinstance(handler, logging.handlersRotatingFileHandler):

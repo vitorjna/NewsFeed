@@ -5,34 +5,13 @@ from typing import List, Optional
 from dataclasses import dataclass
 from .utils import setup_logger, clean_html
 from .database import DatabaseManager
+from .article import Article
 
 logger = setup_logger("FeedFetcher")
-
-@dataclass
-class Article:
-    title: str
-    link: str
-    rss_summary: str
-    published: str
-    source_feed: str
-    source_name: str
-    theme: str
-    image_url: Optional[str] = None
-    short_summary: Optional[str] = None
-    long_summary: Optional[str] = None
-    full_text: Optional[str] = None
 
 class FeedFetcher:
     def __init__(self, db: DatabaseManager):
         self.db = db
-
-    def mark_seen(self, url: str, theme: str, feed_name: Optional[str] = None, feed_url: Optional[str] = None, relevance: Optional[int] = None, importance: Optional[int] = None, urgency: Optional[int] = None, reasoning: Optional[str] = None):
-        """Mark URL as seen, optionally storing scores."""
-        self.db.mark_seen(url, theme, feed_name, feed_url, relevance, importance, urgency, reasoning)
-
-    def mark_published(self, article: Article):
-        """Mark article as published in the database."""
-        self.db.mark_published(article)
 
     def is_similar_already_published(self, article: Article, title_threshold: float = 0.6, summary_threshold: float = 0.5, days: int = 1) -> Optional[str]:
         """
@@ -150,6 +129,11 @@ class FeedFetcher:
                     if self.db.is_seen(link):
                         continue
 
+                    title = clean_html(entry.get('title', 'No Title'))
+                    # Prefer summary, fall back to description or empty
+                    rss_summary = clean_html(entry.get('summary', entry.get('description', '')))
+                    published = entry.get('published', str(time.time()))
+
                     # Age check (ignore everything older than X hours)
                     published_parsed = entry.get('published_parsed')
                     if published_parsed:
@@ -159,7 +143,7 @@ class FeedFetcher:
                         if age_seconds > (max_age_hours * 3600):
                             logger.debug(f"Skipping old article ({int(age_seconds/3600)}h old): {entry.get('title')}")
 
-                            self.mark_seen(
+                            self.db.mark_seen(
                                 link,
                                 theme_name,
                                 feed_name=source_name,
@@ -173,10 +157,6 @@ class FeedFetcher:
                     else:
                         logger.warning(f"No publication date for: {link}. Proceeding with article.")
 
-                    title = clean_html(entry.get('title', 'No Title'))
-                    # Prefer summary, fall back to description or empty
-                    rss_summary = clean_html(entry.get('summary', entry.get('description', '')))
-                    published = entry.get('published', str(time.time()))
                     image_url = self._extract_image(entry)
 
                     article = Article(

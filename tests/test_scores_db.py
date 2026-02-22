@@ -8,7 +8,7 @@ def test_score_storage():
     if os.path.exists(db_path):
         os.remove(db_path)
 
-    fetcher = FeedFetcher(db_path)
+    db = DatabaseManager(db_path)
 
     url = "https://example.com/test-article"
     relevance = 8
@@ -17,7 +17,7 @@ def test_score_storage():
     reasoning = "This is a test article about scores."
 
     # Mark as seen with scores
-    fetcher.mark_seen(url, relevance=relevance, importance=importance, urgency=urgency, reasoning=reasoning)
+    db.mark_seen(url, relevance=relevance, importance=importance, urgency=urgency, reasoning=reasoning)
 
     # Verify storage
     conn = sqlite3.connect(db_path)
@@ -35,7 +35,7 @@ def test_score_storage():
 
     # Test update (ON CONFLICT)
     new_relevance = 10
-    fetcher.mark_seen(url, relevance=new_relevance, importance=importance, urgency=urgency, reasoning="Updated reasoning")
+    db.mark_seen(url, relevance=new_relevance, importance=importance, urgency=urgency, reasoning="Updated reasoning")
 
     conn = sqlite3.connect(db_path)
     c = conn.cursor()

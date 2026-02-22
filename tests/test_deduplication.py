@@ -1,14 +1,14 @@
 import os
 import sqlite3
 import time
-from .fetcher import Article, FeedFetcher
+from .database import DatabaseManager
 
 def test_similarity_deduplication_and_summaries():
     db_path = "data/test_dedup_v3.db"
     if os.path.exists(db_path):
         os.remove(db_path)
 
-    fetcher = FeedFetcher(db_path)
+    db = DatabaseManager(db_path)
 
     test_article = Article(
         title="Apple releases new iPhone 16 with AI features",
@@ -25,7 +25,7 @@ def test_similarity_deduplication_and_summaries():
     assert fetcher.is_similar_already_published(test_article) is None
 
     # Mark as published
-    fetcher.mark_published(test_article)
+    db.mark_published(test_article)
 
     # Verify summary is in database
     conn = sqlite3.connect(db_path)

@@ -5,7 +5,7 @@ import datetime
 from typing import Optional, Dict
 from .utils import setup_logger, extract_json
 from .config import LLMConfig
-from .fetcher import Article
+from .article import Article
 
 logger = setup_logger("NewsAnalyzer")
 
@@ -25,11 +25,11 @@ class NewsAnalyzer:
         )
         self.model = config.model
 
-    def analyze_scores(self, article: Article, prompt_focus: str) -> Optional[AnalysisResult]:
+    def analyze_scores(self, article_title: str, article_content: str, prompt_focus: str) -> Optional[AnalysisResult]:
         """
         Analyzes an article for relevance, importance, and urgency.
         """
-        logger.info(f"Analyzing scores for article: {article.title}")
+        logger.info(f"Analyzing scores for article: {article_title}")
 
         today_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
 
@@ -54,8 +54,7 @@ class NewsAnalyzer:
     IMPORTANT: Response must be ONLY the JSON object. Do not include any explanations, greetings, or markdown markers outside the JSON.
         """
 
-        content_to_analyze = article.full_text if article.full_text else article.rss_summary
-        user_content = f"Title: {article.title}\nLink: {article.link}\nContent/Summary: {content_to_analyze}"
+        user_content = f"Title: {article_title}\nContent/Summary: {article_content}"
 
         # Gemini's OpenAI-compatible API often fails with 'system' role for some models (Gemma)
         if "google" in str(self.llm_client.base_url).lower():
@@ -79,7 +78,7 @@ class NewsAnalyzer:
 
                 content = response.choices[0].message.content
                 if not content:
-                    logger.warning(f"Empty response from LLM for '{article.title}' (possibly safety block) - attempt {attempt + 1}")
+                    logger.warning(f"Empty response from LLM for '{article_title}' (possibly safety block) - attempt {attempt + 1}")
                     continue
 
                 content = extract_json(content)
@@ -93,16 +92,16 @@ class NewsAnalyzer:
                 )
 
             except Exception as e:
-                logger.error(f"Error analyzing scores for '{article.title}' (attempt {attempt + 1}): {e}")
+                logger.error(f"Error analyzing scores for '{article_title}' (attempt {attempt + 1}): {e}")
 
         return None
 
-    def analyze_summaries(self, article: Article, language: Optional[str] = None) -> Optional[Dict[str, str]]:
+    def analyze_summaries(self, article_title: str, article_content: str, language: Optional[str] = None) -> Optional[Dict[str, str]]:
         """
         Generates short and long summaries for an article.
         Returns a dictionary with 'short_summary', 'long_summary', and validity flags.
         """
-        logger.info(f"Generating summaries for article: {article.title}")
+        logger.info(f"Generating summaries for article: {article_title}")
 
         lang_instruction = f"The summaries MUST be written in {language}." if language else "The summaries MUST be written in the same language as the news article provided."
 
@@ -135,18 +134,14 @@ class NewsAnalyzer:
     IMPORTANT: Response must be ONLY the JSON object. Do not include any explanations, greetings, or markdown markers outside the JSON.
         """
 
-        content_to_summarize = article.full_text if article.full_text else article.rss_summary
-
-        if not content_to_summarize or len(content_to_summarize) < 10:
-            logger.warning(f"No content available for article: {article.title}")
+        if not article_content or len(article_content) < 10:
+            logger.warning(f"No content available for article: {article_title}")
             return {
                 'is_valid_news': False,
                 'rejection_reason': 'No content available'
             }
 
-        content_type = "Full Article Text" if article.full_text else "RSS Summary"
-
-        user_content = f"Title: {article.title}\nLink: {article.link}\n{content_type}: {content_to_summarize}"
+        user_content = f"Title: {article_title}\nContent/Summary: {article_content}"
 
         # Gemini's OpenAI-compatible API often fails with 'system' role for some models (Gemma)
         if "google" in str(self.llm_client.base_url).lower():
@@ -170,7 +165,7 @@ class NewsAnalyzer:
 
                 response_content = response.choices[0].message.content
                 if not response_content:
-                    logger.warning(f"Empty response from LLM summaries for '{article.title}' (possibly safety block) - attempt {attempt}")
+                    logger.warning(f"Empty response from LLM summaries for '{article_title}' (possibly safety block) - attempt {attempt}")
                     continue
 
                 response_content = extract_json(response_content)
@@ -184,7 +179,7 @@ class NewsAnalyzer:
                 }
 
             except Exception as e:
-                logger.error(f"Error generating summaries for '{article.title}' (attempt {attempt}): {e}")
+                logger.error(f"Error generating summaries for '{article_title}' (attempt {attempt}): {e}")
                 logger.debug(f"Error generating summaries. Received content: {response_content}")
 
         return None

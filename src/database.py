@@ -115,21 +115,22 @@ class DatabaseManager:
             logger.error(f"Error getting recent published articles: {e}")
             return []
 
-    def purge_old_entries(self, days: int = 30):
+    def purge_old_entries(self, days_delete_unpublished: int = 30, days_delete_published: int = 90):
         """Delete entries older than specified days from seen_urls and published_articles."""
         try:
-            cutoff = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
-            logger.info(f"Purging database entries older than {days} days (before {cutoff})...")
+            cutoff_unpublished = (datetime.now() - timedelta(days=days_delete_unpublished)).strftime('%Y-%m-%d %H:%M:%S')
+            cutoff_published = (datetime.now() - timedelta(days=days_delete_published)).strftime('%Y-%m-%d %H:%M:%S')
+            logger.info(f"Purging database entries older than {days_delete_unpublished} days (before {cutoff_unpublished})...")
 
             conn = sqlite3.connect(self.db_path)
             c = conn.cursor()
 
             # Purge seen_urls
-            c.execute('DELETE FROM seen_urls WHERE first_seen < ?', (cutoff,))
+            c.execute('DELETE FROM seen_urls WHERE first_seen < ?', (cutoff_unpublished,))
             seen_deleted = c.rowcount
 
             # Purge published_articles (maybe keep them longer? but following user request "delete entries older than a month")
-            c.execute('DELETE FROM published_articles WHERE published_at < ?', (cutoff,))
+            c.execute('DELETE FROM published_articles WHERE published_at < ?', (cutoff_published,))
             pub_deleted = c.rowcount
 
             conn.commit()
