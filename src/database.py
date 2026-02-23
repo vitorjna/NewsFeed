@@ -10,52 +10,98 @@ class DatabaseManager:
     def __init__(self, db_path: str):
         self.db_path = db_path
         self._init_db()
+        self.timestamp_format = '%Y-%m-%d %H:%M:%S'
 
     def _init_db(self):
         """Initialize SQLite database with required tables."""
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         conn = sqlite3.connect(self.db_path)
+
+        # Enable foreign keys
+        conn.execute("PRAGMA foreign_keys = ON;")
+
         c = conn.cursor()
 
-        # Table for deduplication and score tracking
         c.execute('''
-            CREATE TABLE IF NOT EXISTS seen_urls (
-                url TEXT PRIMARY KEY,
-                theme TEXT,
-                feed_name TEXT,
-                feed_url TEXT,
+            CREATE TABLE IF NOT EXISTS feeds (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                url TEXT NOT NULL,
+                theme TEXT NOT NULL,
+                UNIQUE(url, theme)
+            )
+        ''')
+
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS articles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                feed_id INTEGER NOT NULL,
+
+                -- 1. RAW RSS DATA (Inserted initially)
+                url TEXT NOT NULL,
+                title TEXT NOT NULL,
+                rss_summary TEXT,
+                rss_date DATETIME,
+                date_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+                -- 2. SCORES & REASONING (Updated for ALL articles)
                 relevance_score INTEGER,
                 importance_score INTEGER,
                 urgency_score INTEGER,
                 reasoning TEXT,
-                first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+
+                -- 3. CONTENT & PUBLICATION (Updated ONLY if scores pass validation)
+                full_content TEXT,
+                short_summary TEXT,
+                long_summary TEXT,
+                is_published INTEGER DEFAULT 0,
+                published_at DATETIME,
+
+                FOREIGN KEY(feed_id) REFERENCES feeds(id) ON DELETE CASCADE
             )
         ''')
 
-        # Table for published articles history
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS published_articles (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                title TEXT,
-                url TEXT,
-                theme TEXT,
-                feed_name TEXT,
-                feed_url TEXT,
-                short_summary TEXT,
-                rss_summary TEXT,
-                published_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
+        # Create indexes
+        c.execute('CREATE INDEX IF NOT EXISTS idx_feeds_theme ON feeds(theme)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_feeds_url ON feeds(url)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_articles_url_feed ON articles(url, feed_id)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_articles_is_published ON articles(is_published)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_articles_date_seen ON articles(date_seen)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_articles_published_at ON articles(published_at)')
 
         conn.commit()
         conn.close()
 
-    def is_seen(self, url: str) -> bool:
-        """Check if URL has been seen before."""
+    def get_or_create_feed(self, name: str, url: str, theme: str) -> Optional[int]:
+        """Gets the feed ID, creating it if it doesn't exist."""
         try:
             conn = sqlite3.connect(self.db_path)
             c = conn.cursor()
-            c.execute('SELECT 1 FROM seen_urls WHERE url = ?', (url,))
+
+            # Try to find existing
+            c.execute('SELECT id FROM feeds WHERE url = ? AND theme = ?', (url, theme))
+            result = c.fetchone()
+
+            if result:
+                feed_id = result[0]
+            else:
+                # Insert new
+                c.execute('INSERT INTO feeds (name, url, theme) VALUES (?, ?, ?)', (name, url, theme))
+                feed_id = c.lastrowid
+                conn.commit()
+
+            conn.close()
+            return feed_id
+        except Exception as e:
+            logger.error(f"Error getting/creating feed: {e}")
+            return None
+
+    def is_seen(self, url: str, feed_id: int) -> bool:
+        """Check if URL for a specific feed has been seen before."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            c = conn.cursor()
+            c.execute('SELECT 1 FROM articles WHERE url = ? AND feed_id = ?', (url, feed_id))
             result = c.fetchone()
             conn.close()
             return result is not None
@@ -63,41 +109,80 @@ class DatabaseManager:
             logger.error(f"Error checking if URL is seen: {e}")
             return False
 
-    def mark_seen(self, url: str, theme: str, feed_name: Optional[str] = None, feed_url: Optional[str] = None, relevance: Optional[int] = None, importance: Optional[int] = None, urgency: Optional[int] = None, reasoning: Optional[str] = None):
-        """Mark URL as seen, optionally storing scores."""
+    def save_article(self, article):
+        """Save all known information about an article."""
         try:
             conn = sqlite3.connect(self.db_path)
-            c = conn.cursor()
-            c.execute('''
-                INSERT INTO seen_urls (url, theme, feed_name, feed_url, relevance_score, importance_score, urgency_score, reasoning)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(url) DO UPDATE SET
-                    theme=excluded.theme,
-                    feed_name=excluded.feed_name,
-                    feed_url=excluded.feed_url,
-                    relevance_score=excluded.relevance_score,
-                    importance_score=excluded.importance_score,
-                    urgency_score=excluded.urgency_score,
-                    reasoning=excluded.reasoning
-            ''', (url, theme, feed_name, feed_url, relevance, importance, urgency, reasoning))
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            logger.error(f"Error marking URL as seen: {e}")
+            conn.execute("PRAGMA foreign_keys = ON;")
 
-    def mark_published(self, article):
-        """Mark article as published in the database."""
-        try:
-            conn = sqlite3.connect(self.db_path)
+            if not article.feed_id:
+                article.feed_id = self.get_or_create_feed(article.source_name, article.source_feed, article.theme)
+                if not article.feed_id:
+                    logger.error(f"Failed to resolve feed for article {article.link}")
+                    return
+
             c = conn.cursor()
-            c.execute(
-                'INSERT INTO published_articles (title, url, theme, feed_name, feed_url, short_summary, rss_summary) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                (article.title, article.link, article.theme, article.source_name, article.source_feed, article.short_summary, article.rss_summary)
-            )
+
+            # Check if article exists
+            c.execute('SELECT id FROM articles WHERE url = ? AND feed_id = ?', (article.link, article.feed_id))
+            row = c.fetchone()
+
+            if row:
+                c.execute('''
+                    UPDATE articles SET
+                        relevance_score = ?,
+                        importance_score = ?,
+                        urgency_score = ?,
+                        reasoning = ?,
+                        full_content = ?,
+                        short_summary = ?,
+                        long_summary = ?,
+                        is_published = ?,
+                        published_at = ?
+                    WHERE id = ?
+                ''', (article.relevance_score,
+                      article.importance_score,
+                      article.urgency_score,
+                      article.reasoning,
+                      article.full_content,
+                      article.short_summary,
+                      article.long_summary,
+                      article.published_at is not None,
+                      article.published_at,
+                      row[0]))
+            else:
+                # Insert new
+                c.execute('''
+                    INSERT INTO articles (
+                        feed_id, url, title, rss_summary, rss_date,
+                        relevance_score, importance_score, urgency_score, reasoning,
+                        full_content, short_summary, long_summary,
+                        is_published, published_at
+                    ) VALUES (?, ?, ?, ?, ?,
+                              ?, ?, ?, ?,
+                              ?, ?, ?,
+                              ?, ?)
+                ''', (
+                    article.feed_id,
+                    article.link,
+                    article.title,
+                    article.rss_summary,
+                    article.rss_date,
+                    article.relevance_score,
+                    article.importance_score,
+                    article.urgency_score,
+                    article.reasoning,
+                    article.full_content,
+                    article.short_summary,
+                    article.long_summary,
+                    article.published_at is not None,
+                    article.published_at,
+                ))
+
             conn.commit()
             conn.close()
         except Exception as e:
-            logger.error(f"Error marking article as published: {e}")
+            logger.error(f"Error saving article: {e}")
 
     def get_recent_published(self, theme: str, days: int) -> List[tuple]:
         """Get articles published in the same theme within the last X days."""
@@ -105,8 +190,10 @@ class DatabaseManager:
             conn = sqlite3.connect(self.db_path)
             c = conn.cursor()
             c.execute('''
-                SELECT title, rss_summary FROM published_articles
-                WHERE theme = ? AND published_at > datetime('now', ?)
+                SELECT a.title, a.rss_summary
+                FROM articles a
+                JOIN feeds f ON a.feed_id = f.id
+                WHERE f.theme = ? AND a.is_published = 1 AND a.published_at > datetime('now', ?)
             ''', (theme, f'-{days} days'))
             results = c.fetchall()
             conn.close()
@@ -115,32 +202,33 @@ class DatabaseManager:
             logger.error(f"Error getting recent published articles: {e}")
             return []
 
-    def purge_old_entries(self, days_delete_unpublished: int = 30, days_delete_published: int = 90):
-        """Delete entries older than specified days from seen_urls and published_articles."""
+    def purge_old_entries(self, days_delete_unpublished: int = 30, days_delete_published: int = 90) -> None:
+        """Delete entries older than specified days from articles."""
         try:
-            cutoff_unpublished = (datetime.now() - timedelta(days=days_delete_unpublished)).strftime('%Y-%m-%d %H:%M:%S')
-            cutoff_published = (datetime.now() - timedelta(days=days_delete_published)).strftime('%Y-%m-%d %H:%M:%S')
+            cutoff_unpublished = (datetime.now() - timedelta(days=days_delete_unpublished)).strftime(self.timestamp_format)
+            cutoff_published = (datetime.now() - timedelta(days=days_delete_published)).strftime(self.timestamp_format)
             logger.info(f"Purging database entries older than {days_delete_unpublished} days (before {cutoff_unpublished})...")
 
             conn = sqlite3.connect(self.db_path)
+            conn.execute("PRAGMA foreign_keys = ON;")
             c = conn.cursor()
 
-            # Purge seen_urls
-            c.execute('DELETE FROM seen_urls WHERE first_seen < ?', (cutoff_unpublished,))
-            seen_deleted = c.rowcount
+            # Purge unpublished articles
+            c.execute('DELETE FROM articles WHERE is_published = 0 AND date_seen < ?', (cutoff_unpublished,))
+            unpub_deleted = c.rowcount
 
-            # Purge published_articles (maybe keep them longer? but following user request "delete entries older than a month")
-            c.execute('DELETE FROM published_articles WHERE published_at < ?', (cutoff_published,))
+            # Purge published articles
+            c.execute('DELETE FROM articles WHERE is_published = 1 AND published_at < ?', (cutoff_published,))
             pub_deleted = c.rowcount
 
             conn.commit()
             conn.close()
 
-            logger.info(f"Purge completed: deleted {seen_deleted} seen URLs and {pub_deleted} published articles.")
+            logger.info(f"Purge completed: deleted {unpub_deleted} unpublished and {pub_deleted} published articles.")
         except Exception as e:
             logger.error(f"Error during database purge: {e}")
 
-    def export_statistics(self, output_path: str):
+    def export_statistics(self, output_path: str) -> None:
         """Export statistics per feed to a text file, with daily and monthly tables."""
         try:
             logger.info(f"Exporting statistics to {output_path}...")
@@ -150,20 +238,20 @@ class DatabaseManager:
             def get_stats(days: int):
                 c.execute('''
                     SELECT
-                        s.theme,
-                        s.feed_name,
-                        COUNT(s.url) as total_seen,
-                        COUNT(p.url) as total_published,
-                        COUNT(p.url) * 100.0 / COUNT(s.url) as publish_rate,
-                        AVG(s.relevance_score) as avg_relevance,
-                        AVG(s.importance_score) as avg_importance,
-                        AVG(s.urgency_score) as avg_urgency,
-                        MAX(p.published_at) as last_published
-                    FROM seen_urls s
-                    LEFT JOIN published_articles p ON s.url = p.url
-                    WHERE s.first_seen >= datetime('now', ? || ' days')
-                    GROUP BY s.theme, s.feed_name
-                    ORDER BY s.theme, s.feed_name
+                        f.theme,
+                        f.name as feed_name,
+                        COUNT(a.id) as total_seen,
+                        SUM(a.is_published) as total_published,
+                        SUM(a.is_published) * 100.0 / COUNT(a.id) as publish_rate,
+                        AVG(a.relevance_score) as avg_relevance,
+                        AVG(a.importance_score) as avg_importance,
+                        AVG(a.urgency_score) as avg_urgency,
+                        MAX(a.published_at) as last_published
+                    FROM articles a
+                    JOIN feeds f ON a.feed_id = f.id
+                    WHERE a.date_seen >= datetime('now', ? || ' days')
+                    GROUP BY f.theme, f.name
+                    ORDER BY f.theme, f.name
                 ''', (f'-{days}',))
                 return c.fetchall()
 
@@ -171,7 +259,7 @@ class DatabaseManager:
             monthly_rows = get_stats(30)
 
             with open(output_path, 'w', encoding='utf-8') as f:
-                f.write(f"NewsFeed Statistics - Exported on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"NewsFeed Statistics - Exported on {datetime.now().strftime(self.timestamp_format)}\n")
                 f.write("="*100 + "\n\n")
 
                 def write_table(title, rows):
@@ -193,6 +281,8 @@ class DatabaseManager:
                             current_theme = theme
 
                         feed_str = str(feed or 'Unknown')[:38]
+                        pub = pub if pub is not None else 0
+                        rate = rate if rate is not None else 0.0
                         avg_r = avg_r if avg_r is not None else 0.0
                         avg_i = avg_i if avg_i is not None else 0.0
                         avg_u = avg_u if avg_u is not None else 0.0
@@ -210,3 +300,6 @@ class DatabaseManager:
             logger.error(f"Error exporting statistics: {e}")
             import traceback
             logger.error(traceback.format_exc())
+
+    def get_current_timestamp(self) -> str:
+        return datetime.now().strftime(self.timestamp_format)

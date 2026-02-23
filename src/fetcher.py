@@ -64,23 +64,23 @@ class FeedFetcher:
             logger.error(f"Error checking for similar articles: {e}")
             return None
 
-    def fetch_full_text(self, url: str) -> Optional[str]:
+    def fetch_full_content(self, url: str) -> Optional[str]:
         """
-        Extract the full article text from the corresponding webpage.
+        Extract the full article content from the corresponding webpage.
         Uses trafilatura for robust extraction.
         """
         import trafilatura
         try:
-            logger.info(f"Fetching full text from: {url}")
+            logger.info(f"Fetching full content from: {url}")
             downloaded = trafilatura.fetch_url(url)
             if downloaded:
                 result = trafilatura.extract(downloaded)
                 if result:
                     return result
-            logger.warning(f"Could not extract full text from {url}")
+            logger.warning(f"Could not extract full content from {url}")
             return None
         except Exception as e:
-            logger.error(f"Error extracting full text from {url}: {e}")
+            logger.error(f"Error extracting full content from {url}: {e}")
             return None
 
     def _extract_image(self, entry) -> Optional[str]:
@@ -113,12 +113,12 @@ class FeedFetcher:
             try:
                 logger.info(f"Fetching {feed_url} for theme '{theme_name}'")
                 feed = feedparser.parse(feed_url)
+                feed_name = feed.feed.title
 
-                # Extract source name/publisher from feed metadata
-                source_name = feed.feed.get('title', feed_url)
-
-                if feed.bozo:
-                    logger.warning(f"Feed {feed_url} has issues: {feed.bozo_exception}")
+                feed_id = self.db.get_or_create_feed(feed_name, feed_url, theme_name)
+                if not feed_id:
+                    logger.error(f"Failed to resolve feed for {feed_url}")
+                    continue
 
                 for entry in feed.entries:
                     link = entry.get('link', '')
@@ -126,7 +126,7 @@ class FeedFetcher:
                         continue
 
                     # Deduplication check
-                    if self.db.is_seen(link):
+                    if self.db.is_seen(link, feed_id):
                         continue
 
                     title = clean_html(entry.get('title', 'No Title'))
@@ -143,16 +143,22 @@ class FeedFetcher:
                         if age_seconds > (max_age_hours * 3600):
                             logger.debug(f"Skipping old article ({int(age_seconds/3600)}h old): {entry.get('title')}")
 
-                            self.db.mark_seen(
-                                link,
-                                theme_name,
-                                feed_name=source_name,
-                                feed_url=feed_url,
-                                relevance=0,
-                                importance=0,
-                                urgency=0,
-                                reasoning="Article is too old"
+                            article = Article(
+                                title=title,
+                                link=link,
+                                rss_summary=rss_summary,
+                                rss_date=published,
+                                source_feed=feed_url,
+                                source_name=feed_name,
+                                theme=theme_name,
+                                image_url=self._extract_image(entry),
+                                relevance_score=0,
+                                importance_score=0,
+                                urgency_score=0,
+                                reasoning="Article is too old",
+                                feed_id=feed_id
                             )
+                            self.db.save_article(article)
                             continue
                     else:
                         logger.warning(f"No publication date for: {link}. Proceeding with article.")
@@ -163,11 +169,12 @@ class FeedFetcher:
                         title=title,
                         link=link,
                         rss_summary=rss_summary,
-                        published=published,
+                        rss_date=published,
                         source_feed=feed_url,
-                        source_name=source_name,
+                        source_name=feed_name,
                         theme=theme_name,
-                        image_url=image_url
+                        image_url=image_url,
+                        feed_id=feed_id
                     )
                     new_articles.append(article)
 

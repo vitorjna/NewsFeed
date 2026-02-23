@@ -57,7 +57,7 @@ class NewsFeedApp:
             cycle_start_time = time.time()
 
             for theme in self.config.themes:
-                logger.info(f"Processing theme: {theme.name}")
+                logger.info(f"[{theme.name}] Processing theme start")
 
                 # 1. Fetch
                 new_articles = self.fetcher.fetch_feeds(
@@ -67,7 +67,7 @@ class NewsFeedApp:
                 )
 
                 if not new_articles:
-                    logger.info(f"No new articles found for theme: {theme.name}")
+                    logger.info(f"[{theme.name}] No new articles found.")
                     continue
 
                 for article in new_articles:
@@ -75,13 +75,13 @@ class NewsFeedApp:
                     if self.config.llm.base_url and "google" in self.config.llm.base_url.lower():
                         await asyncio.sleep(2) # 30 RPM limit = 2s per request.
 
-                    logger.info(f"Processing article: {article.title[:50]}... | Source: {article.source_name[:30]}...")
+                    logger.info(f"[{theme.name}] Processing article: {article.title[:50]}... | Source: {article.source_name[:30]}...")
 
                     # 2. Analyze Scores
                     scores = await asyncio.to_thread(article.analyze_scores, self.analyzer, self.fetcher, theme.prompt_focus)
 
                     if not scores:
-                        logger.warning(f"Score analysis failed for '{article.title}'. Skipping marking as seen to retry later.")
+                        logger.warning(f"[{theme.name}] Score analysis failed for '{article.title}'. Skipping marking as seen to retry later.")
                         continue
 
                     # Theme scores and decision
@@ -93,39 +93,37 @@ class NewsFeedApp:
                     status = "SELECTED" if is_selected else "SKIPPED"
 
                     logger.info(
-                        f"[ANALYSIS] {status}: Scores: R:{scores.relevance_score}, I:{scores.importance_score}, U:{scores.urgency_score} | "
+                        f"[{theme.name}] [ANALYSIS] {status}: Scores: R:{scores.relevance_score}, I:{scores.importance_score}, U:{scores.urgency_score} | "
                         f"{article.title} | Reasoning: {scores.reasoning}"
                     )
-
-                    should_publish = True
 
                     if is_selected:
                         # 3. Similarity Check
                         similar_title = self.fetcher.is_similar_already_published(article)
                         if similar_title:
-                            logger.info(f"[SKIP] Similar article already published: '{similar_title}'")
+                            logger.info(f"[{theme.name}] [SKIP] Similar article already published: '{similar_title}'")
                         else:
                             # 4. Analyze Summaries
                             await asyncio.to_thread(article.generate_summaries, self.analyzer, self.fetcher, theme.language)
 
                             if not article.is_valid_news:
-                                logger.info(f"[REJECTED] Article rejected: {article.reasoning}")
-                                should_publish = False
+                                logger.info(f"[{theme.name}] [REJECTED] Article rejected: {article.reasoning}")
 
-                            # 5. Publish
-                            if should_publish:
+                            else:
+                                # 5. Publish
                                 try:
                                     if not article.short_summary:
-                                        logger.warning(f"Summary generation failed for '{article.title}'. Defaulting to RSS summary.")
+                                        logger.warning(f"[{theme.name}] Summary generation failed for '{article.title}'. Defaulting to RSS summary.")
                                         article.short_summary = article.rss_summary
 
-                                    await self.publisher.publish(bot, article, scores, theme.channel_id, include_image=theme.include_image)
-                                    article.mark_published(self.db)
+                                    await self.publisher.publish(bot, article, theme.channel_id, include_image=theme.include_image)
+                                    article.mark_published(self.db.get_current_timestamp())
                                 except Exception as e:
-                                    logger.error(f"Failed to publish '{article.title}': {e}")
-                                    continue # do not mark as seen, will try again on the next cycle
+                                    logger.error(f"[{theme.name}] Failed to publish '{article.title}': {e}")
 
-                    article.save(self.db)
+                    self.db.save_article(article)
+
+                logger.info(f"[{theme.name}] Processing theme end")
 
         finally:
             self._is_running_cycle = False

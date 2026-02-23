@@ -5,7 +5,6 @@ import datetime
 from typing import Optional, Dict
 from .utils import setup_logger, extract_json
 from .config import LLMConfig
-from .article import Article
 
 logger = setup_logger("NewsAnalyzer")
 

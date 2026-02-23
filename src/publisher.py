@@ -4,7 +4,6 @@ from telegram.constants import ParseMode
 from telegram.error import TelegramError
 from .utils import setup_logger, format_markdown_as_html
 from .article import Article
-from .analyzer_llm import AnalysisResult
 
 logger = setup_logger("TelegramPublisher")
 
@@ -13,7 +12,7 @@ class TelegramPublisher:
         # Cache: channel_id -> linked discussion group chat_id (or None)
         self._discussion_group_cache: dict[str, int | None] = {}
 
-    async def publish(self, bot: Bot, article: Article, analysis: AnalysisResult, channel_id: str, include_image: bool = False):
+    async def publish(self, bot: Bot, article: Article, channel_id: str, include_image: bool = False) -> None:
         """
         Publishes the article to the specified Telegram channel.
         1. Sends Photo/Message with Title and Short Summary.

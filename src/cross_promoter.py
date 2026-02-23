@@ -104,7 +104,7 @@ class CrossPromoter:
         message = "\n\n".join(blocks)
         return message
 
-    async def promote_channels(self):
+    async def promote_channels(self) -> None:
         """
         Sends a tailored promo message to all configured channels,
         showing only the other channels in the network.

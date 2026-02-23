@@ -1,6 +1,7 @@
 from dataclasses import dataclass
-from typing import Optional, Dict
+from typing import Optional
 from .utils import setup_logger
+from .analyzer_llm import NewsAnalyzer
 
 logger = setup_logger("Article")
 
@@ -9,38 +10,40 @@ class Article:
     title: str
     link: str
     rss_summary: str
-    published: str
+    rss_date: str
     source_feed: str
     source_name: str
     theme: str
     image_url: Optional[str] = None
     short_summary: Optional[str] = None
     long_summary: Optional[str] = None
-    full_text: Optional[str] = None
+    full_content: Optional[str] = None
     relevance_score: Optional[int] = None
     importance_score: Optional[int] = None
     urgency_score: Optional[int] = None
     reasoning: Optional[str] = None
     is_valid_news: bool = True
+    feed_id: Optional[int] = None
+    published_at: Optional[str] = None
 
     def fetch_full_content(self, fetcher, force: bool = False) -> Optional[str]:
         """
         Fetches full text if not present or if forced.
         """
-        if self.full_text and not force:
+        if self.full_content and not force:
             logger.debug(f"Full text already available for '{self.title}'")
-            return self.full_text
+            return self.full_content
 
         logger.debug(f"Fetching full content for '{self.title}'")
-        full_text = fetcher.fetch_full_text(self.link)
-        if full_text:
-            logger.info(f"Full text fetched for '{self.title}', length: {len(full_text)} chars")
-            self.full_text = full_text
-            return full_text
+        full_content = fetcher.fetch_full_content(self.link)
+        if full_content:
+            logger.info(f"Full text fetched for '{self.title}', length: {len(full_content)} chars")
+            self.full_content = full_content
+            return full_content
         logger.warning(f"Could not fetch full text for '{self.title}'")
         return None
 
-    def analyze_scores(self, analyzer: NewsAnalyzer, fetcher: Fetcher, prompt_focus: str, force: bool = False):
+    def analyze_scores(self, analyzer: NewsAnalyzer, fetcher: Fetcher, prompt_focus: str, force: bool = False) -> Optional[AnalysisResult]:
         """
         Analyzes scores if not present or if forced.
         """
@@ -62,7 +65,7 @@ class Article:
             self.reasoning = result.reasoning
         return result
 
-    def generate_summaries(self, analyzer: NewsAnalyzer, fetcher: Fetcher, language: Optional[str] = None, force: bool = False):
+    def generate_summaries(self, analyzer: NewsAnalyzer, fetcher: Fetcher, language: Optional[str] = None, force: bool = False) -> Optional[Dict[str, str]]:
         """
         Generates summaries if not present or if forced.
         """
@@ -70,12 +73,12 @@ class Article:
             logger.debug(f"Summaries already available for '{self.title}'")
             return
 
-        if not self.full_text:
+        if not self.full_content:
             logger.debug(f"Fetching full content before analysis.")
             self.fetch_full_content(fetcher)
 
         logger.info(f"Generating summaries for '{self.title}'")
-        summaries = analyzer.analyze_summaries(self.title, self.full_text, language)
+        summaries = analyzer.analyze_summaries(self.title, self.full_content, language)
         if summaries:
             self.is_valid_news = summaries.get('is_valid_news', True)
             if self.is_valid_news:
@@ -86,23 +89,5 @@ class Article:
                 self.reasoning = f"REJECTED: {summaries.get('rejection_reason', 'No reason provided')}"
         return summaries
 
-    def save(self, db):
-        """
-        Marks as seen in the database, updating scores and reasoning.
-        """
-        db.mark_seen(
-            self.link,
-            self.theme,
-            feed_name=self.source_name,
-            feed_url=self.source_feed,
-            relevance=self.relevance_score,
-            importance=self.importance_score,
-            urgency=self.urgency_score,
-            reasoning=self.reasoning
-        )
-
-    def mark_published(self, db):
-        """
-        Marks article as published in the database.
-        """
-        db.mark_published(self)
+    def mark_published(self, published_at: str) -> None:
+        self.published_at = published_at
