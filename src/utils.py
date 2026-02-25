@@ -4,11 +4,17 @@ import os
 import re
 import html
 import logging.handlers
+from datetime import datetime
+
+_shared_file_handler = None
+_shared_stream_handler = None
 
 def setup_logger(name: str = "NewsFeedApp", level=logging.INFO):
     """
     Sets up a logger with stdout and rotating file handler.
     """
+    global _shared_file_handler, _shared_stream_handler
+
     logger = logging.getLogger(name)
     logger.setLevel(level)
 
@@ -18,23 +24,27 @@ def setup_logger(name: str = "NewsFeedApp", level=logging.INFO):
         )
 
         # Console handler
-        stream_handler = logging.StreamHandler(sys.stdout)
-        stream_handler.setFormatter(formatter)
-        logger.addHandler(stream_handler)
+        if _shared_stream_handler is None:
+            _shared_stream_handler = logging.StreamHandler(sys.stdout)
+            _shared_stream_handler.setFormatter(formatter)
+        logger.addHandler(_shared_stream_handler)
 
         # Rotating file handler
         log_dir = "logs"
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
 
-        file_handler = logging.handlers.RotatingFileHandler(
-            filename=os.path.join(log_dir, "app.log"),
-            maxBytes=10 * 1024 * 1024, # 10MB
-            backupCount=9, # 1 main file + 9 backups = 10 files total
-            encoding='utf-8'
-        )
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
+        if _shared_file_handler is None:
+            date_str = datetime.now().strftime("%Y-%m-%d")
+            _shared_file_handler = logging.handlers.RotatingFileHandler(
+                filename=os.path.join(log_dir, f"app_{date_str}.log"),
+                maxBytes=0, # Disable automatic rollover
+                backupCount=9,
+                encoding='utf-8'
+            )
+            # _shared_file_handler.doRollover() # we now use a new file every day
+            _shared_file_handler.setFormatter(formatter)
+        logger.addHandler(_shared_file_handler)
 
     return logger
 

@@ -54,8 +54,9 @@ class DatabaseManager:
                 full_content TEXT,
                 short_summary TEXT,
                 long_summary TEXT,
-                is_published INTEGER DEFAULT 0,
                 published_at DATETIME,
+                post_id INTEGER DEFAULT -1,
+                discussion_post_id INTEGER DEFAULT -1,
 
                 FOREIGN KEY(feed_id) REFERENCES feeds(id) ON DELETE CASCADE
             )
@@ -65,7 +66,7 @@ class DatabaseManager:
         c.execute('CREATE INDEX IF NOT EXISTS idx_feeds_theme ON feeds(theme)')
         c.execute('CREATE INDEX IF NOT EXISTS idx_feeds_url ON feeds(url)')
         c.execute('CREATE INDEX IF NOT EXISTS idx_articles_url_feed ON articles(url, feed_id)')
-        c.execute('CREATE INDEX IF NOT EXISTS idx_articles_is_published ON articles(is_published)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_articles_post_id ON articles(post_id)')
         c.execute('CREATE INDEX IF NOT EXISTS idx_articles_date_seen ON articles(date_seen)')
         c.execute('CREATE INDEX IF NOT EXISTS idx_articles_published_at ON articles(published_at)')
 
@@ -137,8 +138,9 @@ class DatabaseManager:
                         full_content = ?,
                         short_summary = ?,
                         long_summary = ?,
-                        is_published = ?,
-                        published_at = ?
+                        published_at = ?,
+                        post_id = ?,
+                        discussion_post_id = ?
                     WHERE id = ?
                 ''', (article.relevance_score,
                       article.importance_score,
@@ -147,8 +149,9 @@ class DatabaseManager:
                       article.full_content,
                       article.short_summary,
                       article.long_summary,
-                      article.published_at is not None,
                       article.published_at,
+                      article.post_id,
+                      article.discussion_post_id,
                       row[0]))
             else:
                 # Insert new
@@ -157,11 +160,11 @@ class DatabaseManager:
                         feed_id, url, title, rss_summary, rss_date,
                         relevance_score, importance_score, urgency_score, reasoning,
                         full_content, short_summary, long_summary,
-                        is_published, published_at
+                        published_at, post_id, discussion_post_id
                     ) VALUES (?, ?, ?, ?, ?,
                               ?, ?, ?, ?,
                               ?, ?, ?,
-                              ?, ?)
+                              ?, ?, ?)
                 ''', (
                     article.feed_id,
                     article.link,
@@ -175,8 +178,9 @@ class DatabaseManager:
                     article.full_content,
                     article.short_summary,
                     article.long_summary,
-                    article.published_at is not None,
                     article.published_at,
+                    article.post_id,
+                    article.discussion_post_id,
                 ))
 
             conn.commit()
@@ -193,7 +197,7 @@ class DatabaseManager:
                 SELECT a.title, a.rss_summary
                 FROM articles a
                 JOIN feeds f ON a.feed_id = f.id
-                WHERE f.theme = ? AND a.is_published = 1 AND a.published_at > datetime('now', ?)
+                WHERE f.theme = ? AND a.post_id != -1 AND a.published_at > datetime('now', ?)
             ''', (theme, f'-{days} days'))
             results = c.fetchall()
             conn.close()
@@ -214,11 +218,11 @@ class DatabaseManager:
             c = conn.cursor()
 
             # Purge unpublished articles
-            c.execute('DELETE FROM articles WHERE is_published = 0 AND date_seen < ?', (cutoff_unpublished,))
+            c.execute('DELETE FROM articles WHERE post_id = -1 AND date_seen < ?', (cutoff_unpublished,))
             unpub_deleted = c.rowcount
 
             # Purge published articles
-            c.execute('DELETE FROM articles WHERE is_published = 1 AND published_at < ?', (cutoff_published,))
+            c.execute('DELETE FROM articles WHERE post_id != -1 AND published_at < ?', (cutoff_published,))
             pub_deleted = c.rowcount
 
             conn.commit()
@@ -228,39 +232,69 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error during database purge: {e}")
 
-    def export_statistics(self, output_path: str) -> None:
+    def export_statistics(self, output_path: str, target_date_str: Optional[str] = None) -> None:
         """Export statistics per feed to a text file, with daily and monthly tables."""
         try:
             logger.info(f"Exporting statistics to {output_path}...")
+            if not target_date_str:
+                target_date_str = datetime.now().strftime('%Y-%m-%d')
+
             conn = sqlite3.connect(self.db_path)
             c = conn.cursor()
 
-            def get_stats(days: int):
+            def get_daily_stats(date_str: str):
                 c.execute('''
                     SELECT
                         f.theme,
                         f.name as feed_name,
                         COUNT(a.id) as total_seen,
-                        SUM(a.is_published) as total_published,
-                        SUM(a.is_published) * 100.0 / COUNT(a.id) as publish_rate,
+                        SUM(CASE WHEN a.post_id != -1 THEN 1 ELSE 0 END) as total_published,
+                        SUM(CASE WHEN a.post_id != -1 THEN 1 ELSE 0 END) * 100.0 / COUNT(a.id) as publish_rate,
                         AVG(a.relevance_score) as avg_relevance,
                         AVG(a.importance_score) as avg_importance,
                         AVG(a.urgency_score) as avg_urgency,
                         MAX(a.published_at) as last_published
                     FROM articles a
                     JOIN feeds f ON a.feed_id = f.id
-                    WHERE a.date_seen >= datetime('now', ? || ' days')
+                    WHERE DATE(a.date_seen) = ? OR DATE(a.published_at) = ?
                     GROUP BY f.theme, f.name
                     ORDER BY f.theme, f.name
-                ''', (f'-{days}',))
+                ''', (date_str, date_str))
                 return c.fetchall()
 
-            daily_rows = get_stats(1)
-            monthly_rows = get_stats(30)
+            def get_monthly_stats(end_date_str: str):
+                c.execute('''
+                    SELECT
+                        f.theme,
+                        f.name as feed_name,
+                        COUNT(a.id) as total_seen,
+                        SUM(CASE WHEN a.post_id != -1 THEN 1 ELSE 0 END) as total_published,
+                        SUM(CASE WHEN a.post_id != -1 THEN 1 ELSE 0 END) * 100.0 / COUNT(a.id) as publish_rate,
+                        AVG(a.relevance_score) as avg_relevance,
+                        AVG(a.importance_score) as avg_importance,
+                        AVG(a.urgency_score) as avg_urgency,
+                        MAX(a.published_at) as last_published
+                    FROM articles a
+                    JOIN feeds f ON a.feed_id = f.id
+                    WHERE (DATE(a.date_seen) <= ? AND DATE(a.date_seen) > date(?, '-30 days'))
+                       OR (DATE(a.published_at) <= ? AND DATE(a.published_at) > date(?, '-30 days'))
+                    GROUP BY f.theme, f.name
+                    ORDER BY f.theme, f.name
+                ''', (end_date_str, end_date_str, end_date_str, end_date_str))
+                return c.fetchall()
+
+            daily_rows = get_daily_stats(target_date_str)
+            monthly_rows = get_monthly_stats(target_date_str)
 
             with open(output_path, 'w', encoding='utf-8') as f:
                 f.write(f"NewsFeed Statistics - Exported on {datetime.now().strftime(self.timestamp_format)}\n")
                 f.write("="*100 + "\n\n")
+
+                def write_theme_total(theme, seen, pub):
+                    theme_rate = (pub * 100.0 / seen) if seen > 0 else 0.0
+                    f.write("-" * 100 + "\n")
+                    f.write(f"{'TOTAL ' + theme:<40} | {seen:<5} | {pub:<5} | {theme_rate:<4.1f}% |\n")
+                    f.write("-" * 100 + "\n")
 
                 def write_table(title, rows):
                     f.write(f"### {title}\n")
@@ -270,25 +304,38 @@ class DatabaseManager:
                         return
 
                     current_theme = None
+                    theme_seen = 0
+                    theme_pub = 0
                     for theme, feed, seen, pub, rate, avg_r, avg_i, avg_u, last_pub in rows:
                         if theme != current_theme:
                             if current_theme is not None:
-                                f.write("-" * 100 + "\n")
+                                write_theme_total(current_theme, theme_seen, theme_pub)
+
                             f.write(f"\nTHEME: {theme}\n")
                             f.write("-" * 100 + "\n")
                             f.write(f"{'Feed Name':<40} | {'Seen':<5} | {'Pub':<5} | {'Rate':<5} | {'Avg R':<5} | {'Avg I':<5} | {'Avg U':<5} | {'Last Pub':<16}\n")
                             f.write("-" * 100 + "\n")
                             current_theme = theme
+                            theme_seen = 0
+                            theme_pub = 0
+
+                        pub = pub if pub is not None else 0
+                        theme_seen += seen
+                        theme_pub += pub
 
                         feed_str = str(feed or 'Unknown')[:38]
-                        pub = pub if pub is not None else 0
                         rate = rate if rate is not None else 0.0
                         avg_r = avg_r if avg_r is not None else 0.0
                         avg_i = avg_i if avg_i is not None else 0.0
                         avg_u = avg_u if avg_u is not None else 0.0
                         last_pub_str = last_pub[:16] if last_pub else "Never"
 
-                        f.write(f"{feed_str:<40} | {seen:<5} | {pub:<5} | {rate:<5.2f}% | {avg_r:<5.2f} | {avg_i:<5.2f} | {avg_u:<5.2f} | {last_pub_str:<16}\n")
+                        f.write(f"{feed_str:<40} | {seen:<5} | {pub:<5} | {rate:<4.1f}% | {avg_r:<5.1f} | {avg_i:<5.1f} | {avg_u:<5.1f} | {last_pub_str:<16}\n")
+
+                    # Write summary for the last theme
+                    if current_theme is not None:
+                        write_theme_total(current_theme, theme_seen, theme_pub)
+
                     f.write("-" * 100 + "\n\n")  # closing separator after last theme
 
                 write_table("DAILY STATISTICS (Last 24 Hours)", daily_rows)

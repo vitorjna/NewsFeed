@@ -20,9 +20,12 @@ class FeedConfig:
 
 @dataclass
 class LLMConfig:
-    api_key: str
-    base_url: str
-    model: str
+    primary_api_key: str
+    primary_base_url: str
+    primary_model: str
+    secondary_api_key: str
+    secondary_base_url: str
+    secondary_model: str = "gemma-12b"
 
 @dataclass
 class AppConfig:
@@ -36,6 +39,7 @@ class AppConfig:
     min_urgency_score: int
     themes: List[FeedConfig]
     debug: bool = False
+    dev_mode: bool = False
 
 def load_config(config_path: str = "config/config.yaml") -> AppConfig:
     """
@@ -54,9 +58,12 @@ def load_config(config_path: str = "config/config.yaml") -> AppConfig:
 
     try:
         llm_conf = LLMConfig(
-            api_key=raw_config['llm'].get('api_key', 'not-needed'),
-            base_url=raw_config['llm'].get('base_url', "http://localhost:1234/v1"),
-            model=raw_config['llm'].get('model', "local-model")
+            primary_api_key=raw_config['llm'].get('primary_api_key', 'not-needed'),
+            primary_base_url=raw_config['llm'].get('primary_base_url', "http://localhost:1234/v1"),
+            primary_model=raw_config['llm'].get('primary_model', "gemma-3-27b-it"),
+            secondary_api_key=raw_config['llm'].get('secondary_api_key', 'not-needed'),
+            secondary_base_url=raw_config['llm'].get('secondary_base_url', "http://localhost:1234/v1"),
+            secondary_model=raw_config['llm'].get('secondary_model', "gemma-3-12b-it")
         )
 
         themes = []
@@ -71,7 +78,8 @@ def load_config(config_path: str = "config/config.yaml") -> AppConfig:
             min_importance_score=raw_config.get('min_importance_score', 7),
             min_urgency_score=raw_config.get('min_urgency_score', 7),
             themes=themes,
-            debug=raw_config.get('debug', False)
+            debug=raw_config.get('debug', False),
+            dev_mode=raw_config.get('dev_mode', False)
         )
 
         for theme in raw_config['themes']:

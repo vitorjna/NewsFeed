@@ -9,10 +9,9 @@ from .bot_manager import TelegramBotManager
 logger = setup_logger("CrossPromoter")
 
 class CrossPromoter:
-    def __init__(self, config: AppConfig, analyzer, bot_manager: TelegramBotManager):
+    def __init__(self, config: AppConfig, bot_manager: TelegramBotManager):
         self.config = config
         self._bot_manager = bot_manager
-        self.analyzer = analyzer
         self._channel_cache: Dict[str, dict] = {}
 
         self.intro = "<b>📢 Expand your worldview!</b>\n\n<i>Select your interests and join our other channels:</i>"
@@ -70,6 +69,10 @@ class CrossPromoter:
             if exclude_channel_id and theme.channel_id == exclude_channel_id:
                 continue
 
+            # Skip country specific channels. TODO improve message so these can be included again
+            if "portugal" in theme.name.lower():
+                continue
+
             details = await self._get_channel_details(bot, theme.channel_id)
             if not details:
                 logger.warning(f"Skipping theme '{theme.name}': Could not fetch channel details.")
@@ -109,6 +112,10 @@ class CrossPromoter:
         Sends a tailored promo message to all configured channels,
         showing only the other channels in the network.
         """
+        if self.config.dev_mode:
+            logger.info("[DEV MODE] Skipping cross-promotion sequence.")
+            return
+
         async with self._bot_manager.create_bot() as bot:
             logger.info("Starting tailored cross-promotion sequence...")
 

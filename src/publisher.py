@@ -12,12 +12,16 @@ class TelegramPublisher:
         # Cache: channel_id -> linked discussion group chat_id (or None)
         self._discussion_group_cache: dict[str, int | None] = {}
 
-    async def publish(self, bot: Bot, article: Article, channel_id: str, include_image: bool = False) -> None:
+    async def publish(self, bot: Bot, article: Article, channel_id: str, include_image: bool = False, dev_mode: bool = False) -> None:
         """
         Publishes the article to the specified Telegram channel.
         1. Sends Photo/Message with Title and Short Summary.
         2. Replies to that message with Long Summary in the discussion group.
         """
+        if dev_mode:
+            logger.info(f"[DEV MODE] Skipping publication of article '{article.title}' to channel {channel_id}")
+            return
+
         logger.info(f"Publishing article '{article.title}' to channel {channel_id}")
 
         # Construct the main message caption
@@ -54,7 +58,10 @@ class TelegramPublisher:
             if not message:
                 return
 
-            # Determine where to post the long summary (comment) only if it exists
+            article.post_id = message.message_id
+
+            # Determine where to post the long summary (as a comment) only if it exists
+
             if article.long_summary:
                 discussion_chat_id = None
                 forwarded_message_id = None
@@ -105,6 +112,7 @@ class TelegramPublisher:
                             parse_mode=ParseMode.HTML,
                             disable_notification=True
                         )
+                        article.discussion_post_id = forwarded_message_id
                         logger.info(f"Successfully published '{article.title}' (Comment in discussion group {discussion_chat_id})")
 
                 except Exception as e:

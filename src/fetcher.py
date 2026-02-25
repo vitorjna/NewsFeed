@@ -2,10 +2,10 @@ import feedparser
 import time
 import calendar
 from typing import List, Optional
-from dataclasses import dataclass
 from .utils import setup_logger, clean_html
 from .database import DatabaseManager
 from .article import Article
+import trafilatura
 
 logger = setup_logger("FeedFetcher")
 
@@ -13,63 +13,11 @@ class FeedFetcher:
     def __init__(self, db: DatabaseManager):
         self.db = db
 
-    def is_similar_already_published(self, article: Article, title_threshold: float = 0.6, summary_threshold: float = 0.5, days: int = 1) -> Optional[str]:
-        """
-        Check if an article with a similar title or summary was published in the same theme
-        within the last `days`. Returns the title of the similar article if found.
-        """
-        from difflib import SequenceMatcher
-
-        try:
-            recent_articles = self.db.get_recent_published(article.theme, days)
-            # store highest similarity found by title and summary
-            highest_title_similarity = 0
-            highest_summary_similarity = 0
-            matching_title_article = None
-            matching_summary_article = None
-
-            for existing_title, existing_summary in recent_articles:
-                # 1. Check title similarity first
-                title_sim = SequenceMatcher(None, article.title.lower(), existing_title.lower()).ratio()
-
-                if title_sim >= title_threshold:
-                    logger.info(f"Similarity match by TITLE: Score: {title_sim:.2f} >= {title_threshold}, New: '{article.title}', Matching: '{existing_title}'")
-                    return existing_title
-
-                elif title_sim > highest_title_similarity:
-                    highest_title_similarity = title_sim
-                    matching_title_article = existing_title
-
-                # 2. Check summary similarity (if title didn't match and both have summaries)
-                if article.rss_summary and existing_summary:
-                    # Clean the existing summary in case it was stored with HTML previously
-                    cleaned_existing_summary = clean_html(existing_summary)
-                    summary_sim = SequenceMatcher(None, article.rss_summary.lower(), cleaned_existing_summary.lower()).ratio()
-
-                    if summary_sim >= summary_threshold:
-                        logger.info(f"Similarity match by SUMMARY for '{article.title}': Score: {summary_sim:.2f} >= {summary_threshold}, New Summary: '{article.rss_summary[:300]}...', Matching Summary: '{cleaned_existing_summary[:300]}...'")
-                        return existing_title
-
-                    elif summary_sim > highest_summary_similarity:
-                        highest_summary_similarity = summary_sim
-                        matching_summary_article = existing_title
-
-            if matching_title_article:
-                logger.debug(f"No exact match for '{article.title}'. Highest title similarity: {highest_title_similarity:.2f} with '{matching_title_article}'")
-            if matching_summary_article:
-                logger.debug(f"No exact match for '{article.title}'. Highest summary similarity: {highest_summary_similarity:.2f} with '{matching_summary_article}'")
-
-            return None
-        except Exception as e:
-            logger.error(f"Error checking for similar articles: {e}")
-            return None
-
     def fetch_full_content(self, url: str) -> Optional[str]:
         """
         Extract the full article content from the corresponding webpage.
         Uses trafilatura for robust extraction.
         """
-        import trafilatura
         try:
             logger.info(f"Fetching full content from: {url}")
             downloaded = trafilatura.fetch_url(url)

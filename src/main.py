@@ -4,7 +4,7 @@ import time
 import schedule
 import signal
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from .config import load_config
 from .utils import setup_logger
 from .fetcher import FeedFetcher
@@ -38,7 +38,7 @@ class NewsFeedApp:
         self.analyzer = NewsAnalyzer(self.config.llm)
         self.bot_manager = TelegramBotManager(self.config.telegram_bot_token)
         self.publisher = TelegramPublisher()
-        self.cross_promoter = cross_promoter.CrossPromoter(self.config, self.analyzer, self.bot_manager)
+        self.cross_promoter = cross_promoter.CrossPromoter(self.config, self.bot_manager)
 
     async def run_cycle(self):
         """
@@ -72,34 +72,43 @@ class NewsFeedApp:
 
                 for article in new_articles:
                     # Add a small delay to respect rate limits (especially for Gemini free tier)
-                    if self.config.llm.base_url and "google" in self.config.llm.base_url.lower():
+                    if self.config.llm.primary_base_url and "google" in self.config.llm.primary_base_url.lower():
                         await asyncio.sleep(2) # 30 RPM limit = 2s per request.
 
                     logger.info(f"[{theme.name}] Processing article: {article.title[:50]}... | Source: {article.source_name[:30]}...")
 
                     # 2. Analyze Scores
-                    scores = await asyncio.to_thread(article.analyze_scores, self.analyzer, self.fetcher, theme.prompt_focus)
+                    await asyncio.to_thread(article.analyze_scores, self.analyzer, self.fetcher, theme.prompt_focus)
 
-                    if not scores:
-                        logger.warning(f"[{theme.name}] Score analysis failed for '{article.title}'. Skipping marking as seen to retry later.")
-                        continue
-
-                    # Theme scores and decision
                     is_selected = (
-                        scores.relevance_score >= theme.min_relevance_score and
-                        scores.importance_score >= theme.min_importance_score and
-                        scores.urgency_score >= theme.min_urgency_score
+                        article.relevance_score >= theme.min_relevance_score and
+                        article.importance_score >= theme.min_importance_score and
+                        article.urgency_score >= theme.min_urgency_score
                     )
+
+                    if not is_selected:
+                        # also select if importance and urgency are 1 point below the threshold but their sum is above the threshold
+                        # allows for stricter definition of the threshold, but still let's articles be selected if one score is 1 point below but the other score is at least 1 point above
+                        is_selected = (
+                            article.relevance_score >= theme.min_relevance_score and
+                            (article.importance_score >= theme.min_importance_score - 1 and
+                            article.urgency_score >= theme.min_urgency_score - 1)
+                            and (article.importance_score + article.urgency_score) >= theme.min_importance_score + theme.min_urgency_score
+                        )
+                        logger.debug(f"[{theme.name}] [ANALYSIS] {article.title} is selected due to fuzzy score matching")
+
                     status = "SELECTED" if is_selected else "SKIPPED"
 
                     logger.info(
-                        f"[{theme.name}] [ANALYSIS] {status}: Scores: R:{scores.relevance_score}, I:{scores.importance_score}, U:{scores.urgency_score} | "
-                        f"{article.title} | Reasoning: {scores.reasoning}"
+                        f"[{theme.name}] [ANALYSIS] {status}: Scores: R:{article.relevance_score}, I:{article.importance_score}, U:{article.urgency_score} | "
+                        f"{article.title} | Reasoning: {article.reasoning}"
                     )
 
                     if is_selected:
-                        # 3. Similarity Check
-                        similar_title = self.fetcher.is_similar_already_published(article)
+                        # 3. Similarity Check, before calling the LLM to generate summaries
+                        recent_articles = self.db.get_recent_published(theme.name, days=2)
+                        similar_title = self.analyzer.check_for_duplicate(article, recent_articles)
+
                         if similar_title:
                             logger.info(f"[{theme.name}] [SKIP] Similar article already published: '{similar_title}'")
                         else:
@@ -116,7 +125,7 @@ class NewsFeedApp:
                                         logger.warning(f"[{theme.name}] Summary generation failed for '{article.title}'. Defaulting to RSS summary.")
                                         article.short_summary = article.rss_summary
 
-                                    await self.publisher.publish(bot, article, theme.channel_id, include_image=theme.include_image)
+                                    await self.publisher.publish(bot, article, theme.channel_id, include_image=theme.include_image, dev_mode=self.config.dev_mode)
                                     article.mark_published(self.db.get_current_timestamp())
                                 except Exception as e:
                                     logger.error(f"[{theme.name}] Failed to publish '{article.title}': {e}")
@@ -132,21 +141,10 @@ class NewsFeedApp:
     def _perform_daily_maintenance(self):
         logger.debug("Performing daily maintenance tasks...")
         self.db.purge_old_entries(days_delete_unpublished=30, days_delete_published=90)
-        # find the log file handler and rollover to a new file
-        #for handler in logger.handlers:
-            #if isinstance(handler, logging.handlersRotatingFileHandler):
-                #handler.doRollover()
-                #break
-
         logger.debug("Daily maintenance tasks completed.")
 
 
     def run(self):
-        #for handler in logger.handlers:
-            #if isinstance(handler, logging.handlersRotatingFileHandler):
-                #handler.doRollover()
-                #break
-
         """
         Starts the scheduler loop.
         """
@@ -170,9 +168,11 @@ class NewsFeedApp:
 
         # Statistics export
         os.makedirs("logs", exist_ok=True)
-        schedule.every().day.at("03:05").do(
-            lambda: self.db.export_statistics(f"logs/statistics_{datetime.now().strftime('%Y-%m-%d')}.txt")
-        )
+        def export_yesterday_stats():
+            yesterday_str = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+            self.db.export_statistics(f"logs/statistics_{yesterday_str}.txt", target_date_str=yesterday_str)
+
+        schedule.every().day.at("03:05").do(export_yesterday_stats)
 
         # Cross-promotion schedule
         schedule.every().day.at("09:00").do(
