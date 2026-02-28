@@ -54,6 +54,7 @@ class DatabaseManager:
                 full_content TEXT,
                 short_summary TEXT,
                 long_summary TEXT,
+                embedding TEXT,
                 published_at DATETIME,
                 post_id INTEGER DEFAULT -1,
                 discussion_post_id INTEGER DEFAULT -1,
@@ -138,6 +139,7 @@ class DatabaseManager:
                         full_content = ?,
                         short_summary = ?,
                         long_summary = ?,
+                        embedding = ?,
                         published_at = ?,
                         post_id = ?,
                         discussion_post_id = ?
@@ -149,6 +151,7 @@ class DatabaseManager:
                       article.full_content,
                       article.short_summary,
                       article.long_summary,
+                      article.embedding,
                       article.published_at,
                       article.post_id,
                       article.discussion_post_id,
@@ -159,11 +162,11 @@ class DatabaseManager:
                     INSERT INTO articles (
                         feed_id, url, title, rss_summary, rss_date,
                         relevance_score, importance_score, urgency_score, reasoning,
-                        full_content, short_summary, long_summary,
+                        full_content, short_summary, long_summary, embedding,
                         published_at, post_id, discussion_post_id
                     ) VALUES (?, ?, ?, ?, ?,
                               ?, ?, ?, ?,
-                              ?, ?, ?,
+                              ?, ?, ?, ?,
                               ?, ?, ?)
                 ''', (
                     article.feed_id,
@@ -178,6 +181,7 @@ class DatabaseManager:
                     article.full_content,
                     article.short_summary,
                     article.long_summary,
+                    article.embedding,
                     article.published_at,
                     article.post_id,
                     article.discussion_post_id,
@@ -194,7 +198,7 @@ class DatabaseManager:
             conn = sqlite3.connect(self.db_path)
             c = conn.cursor()
             c.execute('''
-                SELECT a.title, a.rss_summary
+                SELECT a.title, a.rss_summary, a.embedding
                 FROM articles a
                 JOIN feeds f ON a.feed_id = f.id
                 WHERE f.theme = ? AND a.post_id != -1 AND a.published_at > datetime('now', ?)
@@ -231,6 +235,34 @@ class DatabaseManager:
             logger.info(f"Purge completed: deleted {unpub_deleted} unpublished and {pub_deleted} published articles.")
         except Exception as e:
             logger.error(f"Error during database purge: {e}")
+
+    def cleanup_embeddings(self, days: int = 3) -> None:
+        """Delete embedding data for articles published X or more days ago."""
+        try:
+            cutoff_date = (datetime.now() - timedelta(days=days)).strftime(self.timestamp_format)
+            logger.info(f"Cleaning up embeddings for articles published before {cutoff_date} ({days} days ago)...")
+
+            conn = sqlite3.connect(self.db_path)
+            c = conn.cursor()
+
+            # Set embedding to NULL for articles published before the cutoff,
+            # or not published (we generate embeds before summaries, and some articles are rejected during summary generation)
+            c.execute('''
+                UPDATE articles
+                SET embedding = NULL
+                WHERE (published_at IS NULL OR published_at < ?) AND embedding IS NOT NULL
+            ''', (cutoff_date,))
+
+            cleaned_count = c.rowcount
+            conn.commit()
+            conn.close()
+
+            if cleaned_count > 0:
+                logger.info(f"Embedding cleanup completed: cleared {cleaned_count} entries.")
+            else:
+                logger.debug("No old embeddings found to clean up.")
+        except Exception as e:
+            logger.error(f"Error during embedding cleanup: {e}")
 
     def export_statistics(self, output_path: str, target_date_str: Optional[str] = None) -> None:
         """Export statistics per feed to a text file, with daily and monthly tables."""

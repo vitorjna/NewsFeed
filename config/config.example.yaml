@@ -5,48 +5,120 @@ telegram_bot_token: "YOUR_TELEGRAM_BOT_TOKEN"
 
 # LLM Configuration: Supports local providers (LM Studio, Ollama) or cloud providers.
 llm:
-  api_key: "not-needed-for-local" # Key or placeholder for local providers
-  base_url: "http://localhost:1234/v1" # LM Studio: http://localhost:1234/v1 | Ollama: http://localhost:11434/v1
-  model: "local-model" # The specific model loaded in your provider
+  primary_api_key: "YOUR_PRIMARY_API_KEY"
+  primary_base_url: "https://generativelanguage.googleapis.com/v1beta/openai/"
+  primary_model: "gemma-3-27b-it"
+  secondary_api_key: "YOUR_SECONDARY_API_KEY"
+  secondary_base_url: "https://generativelanguage.googleapis.com/v1beta/openai/"
+  secondary_model: "gemma-3-12b-it"
+
+# Embedding Configuration: used for duplicate detection and similarity searches.
+embeddings:
+  embedding_api_key: "YOUR_EMBEDDING_API_KEY"
+  embedding_base_url: "https://generativelanguage.googleapis.com/v1beta/openai/"
+  embedding_model: "gemini-embedding-001"
 
 # Global Application Settings
-fetch_interval_minutes: 5
-database_path: "data/seen_urls.db"
-debug: false
+fetch_interval_minutes: 15
+max_article_age_hours: 6
+database_path: "data/news_feed.db"
+debug: true
+dev_mode: false
 
-# Posting Thresholds: An article is posted if ANY score meets or exceeds these values.
+# Posting Thresholds: An article is posted if all scores are met, or if, between importance and urgency, one is 1 point below, but the other is at least 1 point above.
 min_relevance_score: 8
-min_importance_score: 8
-min_urgency_score: 8
+min_importance_score: 7
+min_urgency_score: 7
 
 # Themes and Channels: Define topics, target channels, and source RSS feeds.
 themes:
-  - name: "Breaking News"
-    channel_id: "-1001234567890" # Example Channel ID
+  - name: "Breaking News - Portugal"
+    channel_id: "-100_YOUR_CHANNEL_ID"
     language: "Portuguese (PT-PT)"
     feeds:
+      - "https://feeds.feedburner.com/PublicoRSS"
+      - "https://www.noticiasaominuto.com/rss/pais"
+      - "https://www.rtp.pt/noticias/rss/pais"
+      - "https://rss.impresa.pt/feed/latest/expresso.rss?limit=20"
+    prompt_focus: >
+      breaking news, major national events, and high urgency situations SPECIFICALLY in Portugal.
+      FOCUS on events with significant societal impact on the daily lives of people in Portugal, major political developments, national economic shifts, or significant infrastructure changes.
+      REJECT minor local crime stories, routine administrative news, sports match results, celebrity gossip, or opinion pieces without major factual weight.
+      REJECT if the content is primarily a video or audio with little text.
+      REJECT newsletters, daily briefings, 'roundups', or articles summarizing multiple unrelated topics.
+      High importance means events of national interest or history-making moments for the country.
+
+  - name: "Breaking News - World"
+    channel_id: "-100_YOUR_CHANNEL_ID"
+    feeds:
+      - "https://www.theguardian.com/world/rss"
+      - "https://rss.dw.com/xml/rss-en-all"
+      - "https://www.france24.com/en/rss"
+      - "https://www.aljazeera.com/xml/rss/all.xml"
       - "http://feeds.bbci.co.uk/news/world/rss.xml"
       - "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"
+      - "https://feeds.skynews.com/feeds/rss/world.xml"
     prompt_focus: >
       breaking news, major world events, high urgency.
-      FOCUS on events with global impact.
-      REJECT local stories or minor updates.
-    include_image: false # Default is false, relying on web page preview
+      FOCUS on events with impact on people's daily lives or significant geopolitical shifts.
+      REJECT minor updates on ongoing conflicts, local crime stories, opinion pieces, or celebrity gossip.
+      REJECT if the content is primarily a video or audio with little text.
+      REJECT newsletters, daily briefings, 'roundups', or articles summarizing multiple unrelated topics.
+      High importance means history-making events.
 
-  - name: "Science"
-    channel_id: "-1000987654321"
+  - name: "Science News"
+    channel_id: "-100_YOUR_CHANNEL_ID"
     feeds:
+      - "https://gizmodo.com/rss/regular/science"
+      - "https://gizmodo.com/earther/feed"
       - "https://www.sciencedaily.com/rss/top/science.xml"
       - "https://rss.nytimes.com/services/xml/rss/nyt/Science.xml"
+      - "https://www.sciencealert.com/feed"
+      - "https://www.science.org/rss/express.xml"
+      - "https://www.newscientist.com/feed/home/"
+      #- "http://feeds.nature.com/nature/rss/current"
     prompt_focus: >
-      scientific discoveries, peer-reviewed research, space exploration.
-      REJECT pop-science fluff or speculative articles.
+      scientific discoveries, peer-reviewed research, space exploration, major medical breakthroughs.
+      REJECT pop-science fluff, purely speculative articles without evidence, or minor health tips.
+      REJECT if the content is primarily a video or audio with little text.
+      REJECT newsletters, daily briefings, 'roundups', or articles summarizing multiple unrelated topics.
+      Focus on hard science and significant advancements.
 
-  - name: "Tech"
-    channel_id: "-1001122334455"
+  - name: "Tech News"
+    channel_id: "-100_YOUR_CHANNEL_ID"
     feeds:
-      - "https://feeds.feedburner.com/TechCrunch/"
+      - "https://feeds.arstechnica.com/arstechnica/index"
       - "https://www.theverge.com/rss/index.xml"
+      - "https://techcrunch.com/feed"
+      - "https://venturebeat.com/feed/"
+      - "https://feeds.skynews.com/feeds/rss/technology.xml"
+      - "https://www.wired.com/feed/rss"
+      - "https://www.technologyreview.com/feed/"
     prompt_focus: >
-      cutting-edge technology, major software/hardware releases, AI breakthroughs.
-      STRICTLY REJECT sales, deals, or promotional content.
+      cutting-edge technology, major software releases, significant hardware innovations, AI breakthroughs, startup ecosystem shifts.
+      STRICTLY REJECT sales, deals, promotions, 'best of' lists, minor gadget accessories, gaming discounts, or affiliate-link heavy content.
+      REJECT if the content is primarily a video or audio with little text.
+      REJECT newsletters, daily briefings, 'roundups', or articles summarizing multiple unrelated topics.
+      Only meaningful tech news.
+
+  - name: "Entertainment News"
+    channel_id: "-100_YOUR_CHANNEL_ID"
+    feeds:
+      - "https://www.slashfilm.com/feed/"
+      - "https://gizmodo.com/io9/feed"
+      - "https://feeds.skynews.com/feeds/rss/entertainment.xml"
+      - "https://variety.com/feed/"
+      - "https://www.thewrap.com/feed/"
+      - "https://deadline.com/feed/rss/"
+      - "https://www.hollywoodreporter.com/feed/"
+      - "https://www.rollingstone.com/feed/"
+    prompt_focus: >
+      major movie releases, big TV show announcements, high-profile celebrity news (marriages, deaths, major controversies), and significant music industry shifts.
+      FOCUS on events with widespread cultural impact or major industry developments.
+      REJECT minor tabloid rumors, routine red carpet photos, day-to-day social media posts without significant context, or niche indie news.
+      REJECT if the content is primarily a video or audio with little text.
+      REJECT newsletters, daily briefings, 'roundups', or articles summarizing multiple unrelated topics.
+      High importance means industry-defining moments or cultural phenomena.
+    min_relevance_score: 8
+    min_importance_score: 8
+    min_urgency_score: 8

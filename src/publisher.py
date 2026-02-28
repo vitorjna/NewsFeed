@@ -22,7 +22,7 @@ class TelegramPublisher:
             logger.info(f"[DEV MODE] Skipping publication of article '{article.title}' to channel {channel_id}")
             return
 
-        logger.info(f"Publishing article '{article.title}' to channel {channel_id}")
+        logger.info(f"[Telegram Publisher] Publishing article '{article.title}' to channel {channel_id}")
 
         # Construct the main message caption
         caption = f"<b>{article.title}</b>\n\n"
@@ -44,7 +44,7 @@ class TelegramPublisher:
                     published = True
 
                 except TelegramError as e:
-                    logger.warning(f"Failed to send photo, falling back to text: {e}")
+                    logger.warning(f"[Telegram Publisher] Failed to send photo, falling back to text: {e}")
 
             if not published:
                 # If include_image is False OR image_url is missing, rely on web page preview
@@ -89,17 +89,17 @@ class TelegramPublisher:
                                         msg.forward_from_chat and msg.forward_from_chat.id == chat_info.id and
                                         msg.forward_from_message_id == message.message_id):
                                         forwarded_message_id = msg.message_id
-                                        logger.debug(f"Found forwarded message {forwarded_message_id} in discussion group on attempt {attempt}")
+                                        logger.debug(f"[Telegram Publisher] Found forwarded message {forwarded_message_id} in discussion group on attempt {attempt}")
                                         break
 
                             except Exception as update_err:
-                                logger.warning(f"Error fetching updates (attempt {attempt}/{max_attempts}): {update_err}")
+                                logger.warning(f"[Telegram Publisher] Error fetching updates (attempt {attempt}/{max_attempts}): {update_err}")
 
                             if forwarded_message_id:
                                 break
 
                     if not forwarded_message_id:
-                        logger.error(f"Could not find forwarded message in discussion group for '{article.title}' after attempts. Skipping long summary comment.")
+                        logger.error(f"[Telegram Publisher] Could not find forwarded message in discussion group for '{article.title}' after attempts. Skipping long summary comment.")
                     else:
                         # 3. Post the summary comment
                         formatted_long_summary = format_markdown_as_html(article.long_summary)
@@ -113,12 +113,12 @@ class TelegramPublisher:
                             disable_notification=True
                         )
                         article.discussion_post_id = forwarded_message_id
-                        logger.info(f"Successfully published '{article.title}' (Comment in discussion group {discussion_chat_id})")
+                        logger.info(f"[Telegram Publisher] Successfully published '{article.title}' (Comment in discussion group {discussion_chat_id})")
 
                 except Exception as e:
-                    logger.error(f"Error handling discussion group publication for '{article.title}': {e}")
+                    logger.error(f"[Telegram Publisher] Error handling discussion group publication for '{article.title}': {e}")
             else:
-                logger.info(f"Successfully published '{article.title}' (No long summary generated)")
+                logger.info(f"[Telegram Publisher] Successfully published '{article.title}' (No long summary generated)")
 
         except TelegramError as e:
-            logger.error(f"Failed to publish article '{article.title}': {e}")
+            logger.error(f"[Telegram Publisher] Failed to publish article '{article.title}': {e}")

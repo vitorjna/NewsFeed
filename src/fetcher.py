@@ -4,7 +4,6 @@ import calendar
 from typing import List, Optional
 from .utils import setup_logger, clean_html
 from .database import DatabaseManager
-from .article import Article
 import trafilatura
 
 logger = setup_logger("FeedFetcher")
@@ -19,16 +18,16 @@ class FeedFetcher:
         Uses trafilatura for robust extraction.
         """
         try:
-            logger.info(f"Fetching full content from: {url}")
+            logger.info(f"[Content Fetcher] Fetching full content from: {url}")
             downloaded = trafilatura.fetch_url(url)
             if downloaded:
                 result = trafilatura.extract(downloaded)
                 if result:
                     return result
-            logger.warning(f"Could not extract full content from {url}")
+            logger.warning(f"[Content Fetcher] Could not extract full content from {url}")
             return None
         except Exception as e:
-            logger.error(f"Error extracting full content from {url}: {e}")
+            logger.error(f"[Content Fetcher] Error extracting full content from {url}: {e}")
             return None
 
     def _extract_image(self, entry) -> Optional[str]:
@@ -56,16 +55,20 @@ class FeedFetcher:
         Fetch articles from a list of feeds.
         Returns a list of NEW articles.
         """
+        from .article import Article
+
+        logger.info(f"[Feed Fetcher] Fetching feeds for theme '{theme_name}'")
+
         new_articles = []
         for feed_url in feeds:
             try:
-                logger.info(f"Fetching {feed_url} for theme '{theme_name}'")
+                logger.debug(f"[Feed Fetcher] Fetching {feed_url} for theme '{theme_name}'")
                 feed = feedparser.parse(feed_url)
                 feed_name = feed.feed.title
 
                 feed_id = self.db.get_or_create_feed(feed_name, feed_url, theme_name)
                 if not feed_id:
-                    logger.error(f"Failed to resolve feed for {feed_url}")
+                    logger.error(f"[Feed Fetcher] Failed to resolve feed for {feed_url}")
                     continue
 
                 for entry in feed.entries:
@@ -89,7 +92,7 @@ class FeedFetcher:
                         pub_time = calendar.timegm(published_parsed)
                         age_seconds = time.time() - pub_time
                         if age_seconds > (max_age_hours * 3600):
-                            logger.debug(f"Skipping old article ({int(age_seconds/3600)}h old): {entry.get('title')}")
+                            logger.debug(f"[Feed Fetcher] Skipping old article ({int(age_seconds/3600)}h old): {entry.get('title')}")
 
                             article = Article(
                                 title=title,
@@ -109,7 +112,7 @@ class FeedFetcher:
                             self.db.save_article(article)
                             continue
                     else:
-                        logger.warning(f"No publication date for: {link}. Proceeding with article.")
+                        logger.warning(f"[Feed Fetcher] No publication date for: {link}. Proceeding with article.")
 
                     image_url = self._extract_image(entry)
 
@@ -127,7 +130,7 @@ class FeedFetcher:
                     new_articles.append(article)
 
             except Exception as e:
-                logger.error(f"Error fetching feed {feed_url}: {e}")
+                logger.error(f"[Feed Fetcher] Error fetching feed {feed_url}: {e}")
 
-        logger.info(f"Found {len(new_articles)} new articles for theme '{theme_name}'")
+        logger.info(f"[Feed Fetcher] Found {len(new_articles)} new articles for theme '{theme_name}'")
         return new_articles

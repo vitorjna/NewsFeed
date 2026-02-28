@@ -25,12 +25,19 @@ class LLMConfig:
     primary_model: str
     secondary_api_key: str
     secondary_base_url: str
-    secondary_model: str = "gemma-12b"
+    secondary_model: str
+
+@dataclass
+class EmbeddingConfig:
+    embedding_api_key: str
+    embedding_base_url: str
+    embedding_model: str
 
 @dataclass
 class AppConfig:
     telegram_bot_token: str
     llm: LLMConfig
+    embeddings: EmbeddingConfig
     fetch_interval_minutes: int
     max_article_age_hours: int
     database_path: str
@@ -66,11 +73,18 @@ def load_config(config_path: str = "config/config.yaml") -> AppConfig:
             secondary_model=raw_config['llm'].get('secondary_model', "gemma-3-12b-it")
         )
 
+        emb_conf = EmbeddingConfig(
+            embedding_api_key=raw_config.get('embeddings', {}).get('embedding_api_key', 'not-needed'),
+            embedding_base_url=raw_config.get('embeddings', {}).get('embedding_base_url', "http://localhost:1234/v1"),
+            embedding_model=raw_config.get('embeddings', {}).get('embedding_model', "text-embedding-3-small")
+        )
+
         themes = []
 
         config = AppConfig(
             telegram_bot_token=raw_config['telegram_bot_token'],
             llm=llm_conf,
+            embeddings=emb_conf,
             fetch_interval_minutes=raw_config.get('fetch_interval_minutes', 15),
             max_article_age_hours=raw_config.get('max_article_age_hours', 8),
             database_path=raw_config.get('database_path', 'data/newsfeed.db'),

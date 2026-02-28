@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 from typing import Optional
 from .utils import setup_logger
-from .analyzer_llm import NewsAnalyzer, AnalysisResult
+from .analyzer_llm import NewsAnalyzer
+from .fetcher import FeedFetcher
 
 logger = setup_logger("Article")
 
@@ -22,40 +23,41 @@ class Article:
     importance_score: Optional[int] = None
     urgency_score: Optional[int] = None
     reasoning: Optional[str] = None
+    embedding: Optional[str] = None
     is_valid_news: bool = True
     feed_id: Optional[int] = None
     published_at: Optional[str] = None
     post_id: int = -1
     discussion_post_id: int = -1
 
-    def fetch_full_content(self, fetcher, force: bool = False) -> None:
+    def fetch_full_content(self, fetcher: FeedFetcher, force: bool = False) -> None:
         """
         Fetches full text if not present or if forced.
         """
         if self.full_content and not force:
-            logger.debug(f"Full text already available for '{self.title}'")
+            logger.debug(f"[Content Fetcher] Full text already available for '{self.title}'")
             return
 
-        logger.debug(f"Fetching full content for '{self.title}'")
+        logger.debug(f"[Content Fetcher] Fetching full content for '{self.title}'")
         full_content = fetcher.fetch_full_content(self.link)
         if full_content:
-            logger.info(f"Full text fetched for '{self.title}', length: {len(full_content)} chars")
+            logger.info(f"[Content Fetcher] Full text fetched for '{self.title}', length: {len(full_content)} chars")
             self.full_content = full_content
         else:
-            logger.warning(f"Could not fetch full text for '{self.title}'")
+            logger.warning(f"[Content Fetcher] Could not fetch full text for '{self.title}'")
 
-    def analyze_scores(self, analyzer: NewsAnalyzer, fetcher: Fetcher, prompt_focus: str, force: bool = False) -> None:
+    def analyze_scores(self, analyzer: NewsAnalyzer, fetcher: FeedFetcher, prompt_focus: str, force: bool = False) -> None:
         """
         Analyzes scores if not present or if forced.
         """
         if self.relevance_score is not None and not force:
-            logger.debug(f"Scores already analyzed for '{self.title}'")
+            logger.debug(f"[Score Analyzer] Scores already analyzed for '{self.title}'")
             return
 
-        logger.info(f"Analyzing scores for '{self.title}'")
+        logger.info(f"[Score Analyzer] Analyzing scores for '{self.title}'")
 
         if not self.rss_summary or len(self.rss_summary) < 20:
-            logger.debug(f"RSS summary missing or too short for '{self.title}', fetching full content before analysis.")
+            logger.debug(f"[Score Analyzer] RSS summary missing or too short for '{self.title}', fetching full content before analysis.")
             self.fetch_full_content(fetcher)
             result = analyzer.analyze_scores(self.title, self.full_content, prompt_focus)
 
@@ -67,29 +69,29 @@ class Article:
         self.urgency_score = result.urgency_score
         self.reasoning = result.reasoning
 
-    def generate_summaries(self, analyzer: NewsAnalyzer, fetcher: Fetcher, language: Optional[str] = None, force: bool = False) -> None:
+    def generate_summaries(self, analyzer: NewsAnalyzer, fetcher: FeedFetcher, language: Optional[str] = None, force: bool = False) -> None:
         """
         Generates summaries if not present or if forced.
         """
         if self.short_summary and self.long_summary and not force:
-            logger.debug(f"Summaries already available for '{self.title}'")
+            logger.debug(f"[Summary Generator] Summaries already available for '{self.title}'")
             return
 
         if not self.full_content:
-            logger.debug(f"Fetching full content before analysis.")
+            logger.debug(f"[Summary Generator] Fetching full content before analysis.")
             self.fetch_full_content(fetcher)
 
-        logger.info(f"Generating summaries for '{self.title}'")
-        summaries = analyzer.analyze_summaries(self.title, self.full_content, language)
+        logger.info(f"[Summary Generator] Generating summaries for '{self.title}'")
+        summaries = analyzer.generate_summaries(self.title, self.full_content, language)
 
         self.is_valid_news = summaries.get('is_valid_news', True)
         if self.is_valid_news:
             self.short_summary = summaries.get('short_summary')
             self.long_summary = summaries.get('long_summary')
-            logger.debug(f"[SUMMARIES] '{self.title}': {self.short_summary[:100]}... | {self.long_summary[:100]}...")
+            logger.debug(f"[Summary Generator] '{self.title}': {self.short_summary[:100]}... | {self.long_summary[:100]}...")
         else:
             self.reasoning = summaries.get('rejection_reason', 'No reason provided')
-            logger.debug(f"[SUMMARIES] '{self.title}': REJECTED: {self.reasoning}")
+            logger.debug(f"[Summary Generator] '{self.title}': REJECTED: {self.reasoning}")
 
     def mark_published(self, published_at: str) -> None:
         self.published_at = published_at
