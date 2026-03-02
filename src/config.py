@@ -109,7 +109,6 @@ def load_config(config_path: str = "config/config.yaml") -> AppConfig:
                 include_image=theme.get('include_image', False)
             ))
 
-        logger.info("Configuration loaded successfully")
         return config
 
     except KeyError as e:

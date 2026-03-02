@@ -5,6 +5,7 @@ import schedule
 import signal
 import logging
 from datetime import datetime, timedelta
+from .article import Article
 from .config import load_config
 from .utils import setup_logger
 from .fetcher import FeedFetcher
@@ -31,7 +32,6 @@ class NewsFeedApp:
             config_mod.logger.setLevel(level)
             cross_promoter.logger.setLevel(level)
             database.logger.setLevel(level)
-            logger.debug("Debug mode enabled")
 
         self.db = DatabaseManager(self.config.database_path)
         self.fetcher = FeedFetcher(self.db)
@@ -59,8 +59,10 @@ class NewsFeedApp:
             for theme in self.config.themes:
                 logger.info(f"[{theme.name}] Processing theme start")
 
+                await self._handle_pending_articles(bot, theme)
+
                 # 1. Fetch
-                new_articles = self.fetcher.fetch_feeds(
+                new_articles: list[Article] = self.fetcher.fetch_feeds(
                     theme.feeds,
                     theme.name,
                     max_age_hours=self.config.max_article_age_hours
@@ -141,6 +143,73 @@ class NewsFeedApp:
             self._is_running_cycle = False
             logger.info(f"[Update Cycle] Completed in {(time.time() - cycle_start_time) / 60:.1f} minutes")
 
+    async def _handle_pending_articles(self, bot, theme):
+        """
+        Checks for articles that were selected for publication but failed to publish,
+        and attempts to re-publish them if they pass age and duplicate checks.
+        """
+        pending_data = self.db.get_pending_articles(theme.name)
+        if not pending_data:
+            return
+
+        logger.info(f"[{theme.name}] Found {len(pending_data)} pending articles from previous attempts.")
+        for p_data in pending_data:
+            p_article = Article(
+                title=p_data['title'],
+                link=p_data['url'],
+                rss_summary=p_data['rss_summary'],
+                rss_date=p_data['rss_date'],
+                source_feed=p_data['source_feed'],
+                source_name=p_data['source_name'],
+                theme=p_data['theme'],
+                short_summary=p_data['short_summary'],
+                long_summary=p_data['long_summary'],
+                full_content=p_data['full_content'],
+                relevance_score=p_data['relevance_score'],
+                importance_score=p_data['importance_score'],
+                urgency_score=p_data['urgency_score'],
+                reasoning=p_data['reasoning'],
+                embedding=p_data['embedding'],
+                post_id=p_data['post_id'],
+                discussion_post_id=p_data['discussion_post_id'],
+                feed_id=p_data['feed_id']
+            )
+
+            # 1. Age check
+            try:
+                date_seen = datetime.strptime(p_data['date_seen'], self.db.timestamp_format)
+                age_hours = (datetime.now() - date_seen).total_seconds() / 3600
+
+                if age_hours > self.config.max_article_age_hours:
+                    logger.info(f"[{theme.name}] [PENDING] Skipping old article: '{p_article.title}' ({int(age_hours)}h old)")
+                    p_article.short_summary = f"SKIPPED: Too old when trying to publish"
+                    self.db.save_article(p_article)
+                    continue
+            except Exception as e:
+                logger.error(f"[{theme.name}] [PENDING] Error checking age for pending article '{p_article.title}': {e}")
+
+            # 2. Duplicate check
+            recent_articles = self.db.get_recent_published(theme.name, days=2)
+            similar_title = self.analyzer.check_for_duplicate(p_article, recent_articles)
+
+            if similar_title:
+                logger.info(f"[{theme.name}] [PENDING] Similar article already published: '{similar_title}'")
+                p_article.short_summary = f"DUPLICATE of {similar_title}"
+                self.db.save_article(p_article)
+                continue
+
+            # 3. Publish
+            logger.info(f"[{theme.name}] [PENDING-PUBLISH] {p_article.title}")
+            try:
+                # on the main loop, we check if the small summary exists and set it to the rss summary if it doesn't
+                # that's already been done on the first publication attempt
+
+                await self.publisher.publish(bot, p_article, theme.channel_id, include_image=theme.include_image, dev_mode=self.config.dev_mode)
+                p_article.mark_published(self.db.get_current_timestamp())
+                self.db.save_article(p_article)
+            except Exception as e:
+                logger.error(f"[{theme.name}] [PENDING] Failed to publish '{p_article.title}': {e}")
+
     def _perform_daily_maintenance(self):
         logger.debug("[Maintenance] Performing daily maintenance tasks...")
         self.db.purge_old_entries(days_delete_unpublished=30, days_delete_published=90)
@@ -158,6 +227,9 @@ class NewsFeedApp:
         logger.info(f"{"=" * 15} 🚀 NEWS FEED APP STARTUP 🚀 {"=" * 15}")
         logger.info(f"{"=" * 12} Startup Time: {startup_time} {"=" * 13}")
         logger.info(f"{"=" * 60}\n")
+
+        if self.config.dev_mode:
+            logger.info("Development mode enabled")
 
         # Initial run
         asyncio.run(self.run_cycle())

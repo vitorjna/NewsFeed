@@ -1,0 +1,121 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <filter id="drop-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="6" flood-color="#000000" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <style>
+    text {
+      font-family: Tahoma, Verdana, Helvetica, sans-serif;
+      alignment-baseline: central;
+      text-anchor: middle;
+    }
+    :not(g) > text, :not(g) > circle, g {
+      filter: url(#drop-shadow);
+    }
+  </style>
+
+  <!-- BACKGROUND COLOR (Cinematic Teal) -->
+  <rect x="0" y="0" width="512" height="512" fill="#009688"/>
+
+  <!-- BORDER: Crisp white circle -->
+  <circle cx="256" cy="256" r="232" fill="none" stroke="#FFFFFF" stroke-width="12"/>
+
+  <!-- MASCOT: The Pop Culture Bear -->
+  <g fill="#FFFFFF">
+    <!-- Bear Ears -->
+    <circle cx="202" cy="80" r="20" />
+    <circle cx="310" cy="80" r="20" />
+
+    <!-- Inner Ear Details -->
+    <circle cx="202" cy="80" r="8" fill="#333" />
+    <circle cx="310" cy="80" r="8" fill="#333" />
+
+    <!-- Bear Head -->
+    <circle cx="256" cy="119" r="62" />
+
+    <!-- Bear Eyes -->
+    <circle cx="232" cy="106" r="5" fill="#333" />
+    <circle cx="280" cy="106" r="5" fill="#333" />
+
+    <!-- Bear Snout & Nose -->
+    <ellipse cx="256" cy="136" rx="26" ry="18" fill="#333" />
+    <ellipse cx="256" cy="130" rx="9" ry="5" fill="#FFFFFF" />
+
+    <!-- Retro 3D Glasses -->
+    <!-- Arms connecting to ears -->
+    <path d="M210 106 L190 96" stroke="#333" stroke-width="6" stroke-linecap="round"/>
+    <path d="M302 106 L322 96" stroke="#333" stroke-width="6" stroke-linecap="round"/>
+
+    <!-- Frames & Bridge -->
+    <path d="M210 90 L250 90 L250 118 L210 118 Z" fill="none" stroke="#333" stroke-width="6" />
+    <path d="M262 90 L302 90 L302 118 L262 118 Z" fill="none" stroke="#333" stroke-width="6" />
+    <rect x="248" y="100" width="16" height="8" fill="#333" />
+
+    <!-- Lenses (Red & Cyan) -->
+    <rect x="212" y="92" width="36" height="24" rx="3" fill="#E53935" opacity="0.8" />
+    <rect x="264" y="92" width="36" height="24" rx="3" fill="#00E5FF" opacity="0.8" />
+
+    <!-- Lens Reflections -->
+    <path d="M216 96 L230 110 M224 96 L238 110" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" opacity="0.5"/>
+    <path d="M268 96 L282 110 M276 96 L290 110" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" opacity="0.5"/>
+
+    <!-- Popcorn Kernels (Drawn before bucket so they tuck inside perfectly) -->
+    <!-- Back layer of popcorn -->
+    <circle cx="210" cy="175" r="14" fill="#FFF9C4" stroke="#333" stroke-width="4" />
+    <circle cx="230" cy="165" r="18" fill="#FFC107" stroke="#333" stroke-width="4" />
+    <circle cx="256" cy="160" r="20" fill="#FFF9C4" stroke="#333" stroke-width="4" />
+    <circle cx="282" cy="165" r="18" fill="#FFFFFF" stroke="#333" stroke-width="4" />
+    <circle cx="302" cy="175" r="14" fill="#FFC107" stroke="#333" stroke-width="4" />
+    <!-- Front layer of popcorn -->
+    <circle cx="200" cy="185" r="12" fill="#FFFFFF" stroke="#333" stroke-width="4" />
+    <circle cx="312" cy="185" r="12" fill="#FFF9C4" stroke="#333" stroke-width="4" />
+    <circle cx="240" cy="180" r="16" fill="#FFFFFF" stroke="#333" stroke-width="4" />
+    <circle cx="272" cy="180" r="16" fill="#FFC107" stroke="#333" stroke-width="4" />
+
+    <!-- Popcorn Bucket Base -->
+    <polygon points="186,186 326,186 305,296 207,296" fill="#FFFFFF" />
+
+    <!-- Popcorn Bucket Red Stripes (Mathematically Tapered) -->
+    <polygon points="206,186 226,186 235,296 221,296" fill="#E53935" />
+    <polygon points="246,186 266,186 263,296 249,296" fill="#E53935" />
+    <polygon points="286,186 306,186 291,296 277,296" fill="#E53935" />
+
+    <!-- Popcorn Bucket Outline Overlay -->
+    <polygon points="186,186 326,186 305,296 207,296" fill="none" stroke="#333" stroke-width="6" stroke-linejoin="round" />
+
+    <!-- Popcorn Bucket Rim (Overlaps the kernels to place them inside) -->
+    <rect x="180" y="176" width="152" height="10" rx="4" fill="#FFFFFF" stroke="#333" stroke-width="5" />
+
+    <!-- Bear Paws -->
+    <circle cx="196" cy="240" r="18" fill="#FFFFFF" stroke="#333" stroke-width="5" />
+    <circle cx="316" cy="240" r="18" fill="#FFFFFF" stroke="#333" stroke-width="5" />
+  </g>
+
+  <!-- CATEGORY -->
+  <text x="256" y="320" font-weight="1000" font-size="100" fill="#FFFFFF" letter-spacing="8">POP</text>
+
+  <!-- NETWORK BADGE: "NB" for News Bear -->
+  <g>
+    <circle cx="256" cy="432" r="42" fill="#FFFFFF"/>
+    <text x="255" y="432" font-weight="1000" font-size="48" fill="#333" letter-spacing="2">NB</text>
+  </g>
+
+  <!-- FOR TESTING, to toggle change style for display -->
+  <g style="display: none; stroke: black;">
+    <line x1="0" y1="0" x2="512" y2="512"/> // TL BR
+    <line x1="0" y1="512" x2="512" y2="0"/> // TR BL
+    <line x1="0" y1="64" x2="512" y2="64"/> // HOR 0.5
+    <line x1="0" y1="128" x2="512" y2="128"/> // HOR 1
+    <line x1="0" y1="192" x2="512" y2="192"/> // HOR 1.5
+    <line x1="0" y1="256" x2="512" y2="256"/> // HOR 2
+    <line x1="0" y1="320" x2="512" y2="320"/> // HOR 2.5
+    <line x1="0" y1="384" x2="512" y2="384"/> // HOR 3
+    <line x1="0" y1="448" x2="512" y2="448"/> // HOR 3.5
+    <line x1="128" y1="0" x2="128" y2="512"/> // VER 1
+    <line x1="256" y1="0" x2="256" y2="512"/> // VER 2
+    <line x1="384" y1="0" x2="384" y2="512"/> // VER 3
+  </g>
+
+</svg>

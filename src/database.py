@@ -382,3 +382,34 @@ class DatabaseManager:
 
     def get_current_timestamp(self) -> str:
         return datetime.now().strftime(self.timestamp_format)
+
+    def get_pending_articles(self, theme: str) -> List[dict]:
+        """Get articles that were selected for publication but failed to publish."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            c = conn.cursor()
+            # Select articles that have summaries but post_id is still -1
+            # We exclude articles marked as duplicates in previous attempts.
+            c.execute('''
+                SELECT
+                    a.title, a.url, a.rss_summary, a.rss_date,
+                    f.url as source_feed, f.name as source_name, f.theme,
+                    a.short_summary, a.long_summary, a.full_content,
+                    a.relevance_score, a.importance_score, a.urgency_score, a.reasoning,
+                    a.embedding, a.post_id, a.discussion_post_id, a.feed_id, a.date_seen
+                FROM articles a
+                JOIN feeds f ON a.feed_id = f.id
+                WHERE f.theme = ?
+                  AND a.post_id = -1
+                  AND a.long_summary IS NOT NULL
+            ''', (theme,))
+
+            columns = [column[0] for column in c.description]
+            results = []
+            for row in c.fetchall():
+                results.append(dict(zip(columns, row)))
+            conn.close()
+            return results
+        except Exception as e:
+            logger.error(f"Error getting pending articles: {e}")
+            return []

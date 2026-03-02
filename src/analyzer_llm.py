@@ -138,7 +138,7 @@ class NewsAnalyzer:
                     logger.info(f"[DEDUP Embeds] POSITIVE (sim: {highest_sim:.3f}). '{article.title}' matches '{matching_title}'")
                     return matching_title
                 else:
-                    logger.info(f"[DEDUP Embeds] NEGATIVE (highest sim: {highest_sim:.3f} with '{matching_title}')")
+                    logger.info(f"[DEDUP Embeds] NEGATIVE (highest sim: {highest_sim:.3f}). '{article.title}' does not match '{matching_title}'")
                     return None
             except Exception as e:
                 logger.error(f"[DEDUP Embeds] Error computing embedding similarity: {e}")

@@ -1,0 +1,149 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <filter id="drop-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="6" flood-color="#000000" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <style>
+    text {
+      font-family: Tahoma, Verdana, Helvetica, sans-serif;
+      alignment-baseline: central;
+      text-anchor: middle;
+    }
+    :not(g) > text, :not(g) > circle, g {
+      filter: url(#drop-shadow);
+    }
+  </style>
+
+  <!-- BACKGROUND COLOR -->
+  <rect x="0" y="0" width="512" height="512" fill="#6600CC"/>
+
+  <!-- BORDER: Crisp white circle -->
+  <circle cx="256" cy="256" r="232" fill="none" stroke="#FFFFFF" stroke-width="12"/>
+
+  <!-- MASCOT: The News Bear -->
+  <g>
+    <!-- Bear Ears -->
+    <circle cx="202" cy="80" r="20" fill="#FFFFFF"/>
+    <circle cx="310" cy="80" r="20" fill="#FFFFFF"/>
+    <!-- Inner Ear Details -->
+    <circle cx="202" cy="80" r="8" fill="#333" />
+    <circle cx="310" cy="80" r="8" fill="#333" />
+
+    <!-- Bear Head -->
+    <circle cx="256" cy="119" r="62" fill="#FFFFFF"/>
+
+    <g>
+      <!-- Bear Body / Lab Coat -->
+      <rect x="190" y="150" width="132" height="132" rx="45" fill="#FFFFFF" />
+
+      <!-- V-Neck Shirt & Tie -->
+      <path d="M 226 160 L 256 210 L 286 160 Z" fill="#B3E5FC" />
+      <path d="M 252 165 L 260 165 L 256 225 Z" fill="#D32F2F" />
+      <rect x="250" y="165" width="12" height="8" rx="2" fill="#B71C1C" />
+
+      <!-- Lab Coat Details -->
+      <path d="M 226 160 L 256 210 L 286 160" fill="none" stroke="#E0E0E0" stroke-width="4" stroke-linecap="round"/>
+      <path d="M 256 210 L 256 270" fill="none" stroke="#E0E0E0" stroke-width="4" stroke-linecap="round"/>
+      <!-- Chest Pocket with Pens -->
+      <rect x="275" y="200" width="24" height="28" rx="3" fill="#FFFFFF" stroke="#E0E0E0" stroke-width="3"/>
+      <line x1="284" y1="200" x2="284" y2="185" stroke="#1976D2" stroke-width="4" stroke-linecap="round"/>
+      <line x1="290" y1="200" x2="290" y2="190" stroke="#D32F2F" stroke-width="4" stroke-linecap="round"/>
+    </g>
+
+    <!-- Face Elements -->
+    <!-- Snout & Nose (Overlaps the top of the shirt slightly) -->
+    <ellipse cx="256" cy="136" rx="26" ry="18" fill="#333" />
+    <ellipse cx="256" cy="130" rx="9" ry="5" fill="#FFFFFF" />
+
+    <!-- Goggles Strap -->
+    <rect x="194" y="98" width="20" height="8" fill="#333" />
+    <rect x="250" y="98" width="12" height="10" fill="#333" />
+    <rect x="298" y="98" width="20" height="8" fill="#333" />
+
+    <!-- Bear Eyes -->
+    <circle cx="232" cy="106" r="5" fill="#333" />
+    <circle cx="280" cy="106" r="5" fill="#333" />
+    <!-- Goggles Lenses -->
+    <rect x="214" y="86" width="36" height="36" rx="8" fill="#E0F7FA" fill-opacity="0.7" stroke="#333" stroke-width="4" />
+    <rect x="262" y="86" width="36" height="36" rx="8" fill="#E0F7FA" fill-opacity="0.7" stroke="#333" stroke-width="4" />
+
+    <!-- Lenses Glare -->
+    <path d="M 220 94 L 236 110" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round"/>
+    <path d="M 268 94 L 284 110" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round"/>
+
+    <!-- LEFT SIDE: Test Tube & Liquid -->
+    <!-- LEFT SIDE: Bunsen Burner -->
+    <rect transform="translate(30, 0)" x="100" y="260" width="40" height="12" rx="4" fill="#9E9E9E" stroke="#333" stroke-width="5"/>
+    <rect transform="translate(30, 0)" x="112" y="210" width="16" height="50" fill="#E0E0E0" stroke="#333" stroke-width="5"/>
+    <!-- Flame Shapes -->
+    <path transform="translate(30, 0)" d="M 120 170 Q 135 210 120 210 Q 105 210 120 170 Z" fill="#FF9800"/>
+    <path transform="translate(30, 0)" d="M 120 185 Q 128 210 120 210 Q 112 210 120 185 Z" fill="#FFEB3B"/>
+    <path transform="translate(30, 0)" d="M 120 195 Q 124 210 120 210 Q 116 210 120 195 Z" fill="#03A9F4"/>
+
+    <!-- Main Tube Base -->
+    <path transform="translate(150, 140) rotate(-30)" d="M -12 -50 L 12 -50 L 12 18 A 12 12 0 0 1 -12 18 Z" fill="#E0F7FA" stroke="#333" stroke-width="5"/>
+    <!-- Boiling Green Liquid -->
+    <path transform="translate(150, 140) rotate(-30)" d="M -9.5 0 L 9.5 0 L 9.5 18 A 9.5 9.5 0 0 1 -9.5 18 Z" fill="#00E676"/>
+    <!-- Boiling Bubbles inside and above liquid -->
+    <circle transform="translate(150, 140) rotate(-30)" cx="-3" cy="10" r="2.5" fill="#FFFFFF"/>
+    <circle transform="translate(150, 140) rotate(-30)" cx="4" cy="18" r="2" fill="#FFFFFF"/>
+    <circle transform="translate(150, 140) rotate(-30)" cx="1" cy="4" r="1.5" fill="#FFFFFF"/>
+    <circle transform="translate(150, 140) rotate(-30)" cx="-2" cy="-4" r="1.5" fill="#00E676"/>
+    <circle transform="translate(150, 140) rotate(-30)" cx="5" cy="-8" r="2" fill="#00E676"/>
+    <!-- Test Tube Rim -->
+    <rect transform="translate(150, 140) rotate(-30)" x="-15" y="-50" width="30" height="6" rx="2" fill="#E0F7FA" stroke="#333" stroke-width="5"/>
+
+    <!-- Left Bear Paw -->
+    <circle cx="125" cy="140" r="18" fill="#FFFFFF" stroke="#333" stroke-width="5"/>
+
+    <!-- RIGHT SIDE: Microscope -->
+    <!-- Base -->
+    <rect x="340" y="260" width="70" height="12" rx="4" fill="#9E9E9E" stroke="#333" stroke-width="5"/>
+    <!-- Stage -->
+    <rect x="330" y="220" width="60" height="8" rx="3" fill="#757575" stroke="#333" stroke-width="5"/>
+    <!-- Arm Pillar -->
+    <rect x="385" y="180" width="16" height="80" rx="4" fill="#BDBDBD" stroke="#333" stroke-width="5"/>
+    <!-- Arm Head Pivot -->
+    <rect x="375" y="160" width="30" height="30" rx="4" fill="#757575" stroke="#333" stroke-width="5"/>
+
+    <!-- Optic Tube Assembly -->
+    <rect transform="translate(365, 175) rotate(-20)" x="-14" y="-60" width="28" height="80" rx="4" fill="#E0E0E0" stroke="#333" stroke-width="5"/>
+    <rect transform="translate(365, 175) rotate(-20)" x="-8" y="-76" width="16" height="16" rx="2" fill="#9E9E9E" stroke="#333" stroke-width="5"/>
+    <rect transform="translate(365, 175) rotate(-20)" x="-10" y="20" width="20" height="10" rx="2" fill="#9E9E9E" stroke="#333" stroke-width="5"/>
+    <path transform="translate(365, 175) rotate(-20)" d="M -6 30 L 6 30 L 4 40 L -4 40 Z" fill="#757575" stroke="#333" stroke-width="5"/>
+
+    <!-- Focus Knob -->
+    <circle cx="390" cy="175" r="12" fill="#424242" stroke="#333" stroke-width="5"/>
+
+    <!-- Right Bear Paw -->
+    <circle cx="395" cy="180" r="18" fill="#FFFFFF" stroke="#333" stroke-width="5"/>
+  </g>
+
+  <!-- CATEGORY -->
+  <text x="256" y="320" font-weight="1000" font-size="100" fill="#FFFFFF" letter-spacing="8">SCI</text>
+
+  <!-- NETWORK BADGE: "NB" for News Bear -->
+  <g>
+    <circle cx="256" cy="432" r="42" fill="#FFFFFF"/>
+    <text x="255" y="432" font-weight="1000" font-size="48" fill="#333" letter-spacing="2">NB</text>
+  </g>
+
+  <!-- FOR TESTING, to toggle change style for display -->
+  <g style="display: none; stroke: black;">
+    <line x1="0" y1="0" x2="512" y2="512"/> // TL BR
+    <line x1="0" y1="512" x2="512" y2="0"/> // TR BL
+    <line x1="0" y1="64" x2="512" y2="64"/> // HOR 0.5
+    <line x1="0" y1="128" x2="512" y2="128"/> // HOR 1
+    <line x1="0" y1="192" x2="512" y2="192"/> // HOR 1.5
+    <line x1="0" y1="256" x2="512" y2="256"/> // HOR 2
+    <line x1="0" y1="320" x2="512" y2="320"/> // HOR 2.5
+    <line x1="0" y1="384" x2="512" y2="384"/> // HOR 3
+    <line x1="0" y1="448" x2="512" y2="448"/> // HOR 3.5
+    <line x1="128" y1="0" x2="128" y2="512"/> // VER 1
+    <line x1="256" y1="0" x2="256" y2="512"/> // VER 2
+    <line x1="384" y1="0" x2="384" y2="512"/> // VER 3
+  </g>
+
+</svg>
