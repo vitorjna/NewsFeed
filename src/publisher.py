@@ -29,6 +29,9 @@ class TelegramPublisher:
         caption += f"{format_markdown_as_html(article.short_summary)}\n\n"
         caption += f"<i><a href='{article.link}'>Source: {article.source_name}</a></i>"
 
+        if article.hashtags:
+            caption += f"\n\n{article.hashtags}"
+
         try:
             message = None
             published = False

@@ -40,6 +40,7 @@ themes:
       - "https://www.noticiasaominuto.com/rss/pais"
       - "https://www.rtp.pt/noticias/rss/pais"
       - "https://rss.impresa.pt/feed/latest/expresso.rss?limit=20"
+    default_hashtags: "#Portugal #NoticiasPT"
     prompt_focus: >
       breaking news, major national events, and high urgency situations SPECIFICALLY in Portugal.
       FOCUS on events with significant societal impact on the daily lives of people in Portugal, major political developments, national economic shifts, or significant infrastructure changes.
@@ -50,6 +51,7 @@ themes:
 
   - name: "Breaking News - World"
     channel_id: "-100_YOUR_CHANNEL_ID"
+    language: "English"
     feeds:
       - "https://www.theguardian.com/world/rss"
       - "https://rss.dw.com/xml/rss-en-all"
@@ -58,6 +60,7 @@ themes:
       - "http://feeds.bbci.co.uk/news/world/rss.xml"
       - "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"
       - "https://feeds.skynews.com/feeds/rss/world.xml"
+    default_hashtags: "#WorldNews #BreakingNews"
     prompt_focus: >
       breaking news, major world events, high urgency.
       FOCUS on events with impact on people's daily lives or significant geopolitical shifts.
@@ -68,6 +71,7 @@ themes:
 
   - name: "Science News"
     channel_id: "-100_YOUR_CHANNEL_ID"
+    language: "English"
     feeds:
       - "https://gizmodo.com/rss/regular/science"
       - "https://gizmodo.com/earther/feed"
@@ -77,6 +81,7 @@ themes:
       - "https://www.science.org/rss/express.xml"
       - "https://www.newscientist.com/feed/home/"
       #- "http://feeds.nature.com/nature/rss/current"
+    default_hashtags: "#Science #ScienceNews"
     prompt_focus: >
       scientific discoveries, peer-reviewed research, space exploration, major medical breakthroughs.
       REJECT pop-science fluff, purely speculative articles without evidence, or minor health tips.
@@ -86,6 +91,7 @@ themes:
 
   - name: "Tech News"
     channel_id: "-100_YOUR_CHANNEL_ID"
+    language: "English"
     feeds:
       - "https://feeds.arstechnica.com/arstechnica/index"
       - "https://www.theverge.com/rss/index.xml"
@@ -94,6 +100,7 @@ themes:
       - "https://feeds.skynews.com/feeds/rss/technology.xml"
       - "https://www.wired.com/feed/rss"
       - "https://www.technologyreview.com/feed/"
+    default_hashtags: "#Tech #TechNews"
     prompt_focus: >
       cutting-edge technology, major software releases, significant hardware innovations, AI breakthroughs, startup ecosystem shifts.
       STRICTLY REJECT sales, deals, promotions, 'best of' lists, minor gadget accessories, gaming discounts, or affiliate-link heavy content.
@@ -103,6 +110,7 @@ themes:
 
   - name: "Entertainment News"
     channel_id: "-100_YOUR_CHANNEL_ID"
+    language: "English"
     feeds:
       - "https://www.slashfilm.com/feed/"
       - "https://gizmodo.com/io9/feed"
@@ -112,13 +120,14 @@ themes:
       - "https://deadline.com/feed/rss/"
       - "https://www.hollywoodreporter.com/feed/"
       - "https://www.rollingstone.com/feed/"
+    default_hashtags: "#Entertainment #PopCulture"
     prompt_focus: >
       major movie releases, big TV show announcements, high-profile celebrity news (marriages, deaths, major controversies), and significant music industry shifts.
       FOCUS on events with widespread cultural impact or major industry developments.
       REJECT minor tabloid rumors, routine red carpet photos, day-to-day social media posts without significant context, or niche indie news.
       REJECT if the content is primarily a video or audio with little text.
-      REJECT newsletters, daily briefings, 'roundups', or articles summarizing multiple unrelated topics.
+      REJECT articles with spoilers or plot details, newsletters, daily briefings, 'roundups', or articles summarizing multiple unrelated topics.
       High importance means industry-defining moments or cultural phenomena.
     min_relevance_score: 8
     min_importance_score: 8
-    min_urgency_score: 8
+    min_urgency_score: 7

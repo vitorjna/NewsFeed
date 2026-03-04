@@ -1,5 +1,5 @@
 @echo off
 
-python -m tests.analyze_duplicates
+python -m tests.test_llm
 
 pause

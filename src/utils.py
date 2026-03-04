@@ -8,6 +8,7 @@ from datetime import datetime
 
 _shared_file_handler = None
 _shared_stream_handler = None
+_multi_line_json_pattern = re.compile(r'("[^"]*")\s*\n\s*("[^"]*")(?!\s*:)')
 
 def setup_logger(name: str = "NewsFeedApp", level=logging.INFO):
     """
@@ -52,17 +53,32 @@ def extract_json(content: str) -> str:
     """
     Cleans the LLM response to extract only the JSON part.
     Removes markdown code blocks if present.
+    Also fixes common JSON formatting issues like multi-line strings returned as separate quoted tokens instead of a single value.
     """
-    content = content.strip()
-
     # Try to find the first '{' and last '}'
     start = content.find('{')
     end = content.rfind('}')
 
-    if start != -1 and end != -1:
-        return content[start:end+1]
+    # if no '{' or '}' found, return the original content
+    if start == -1 or end == -1:
+        return content
 
-    return content.strip()
+    json_str = content[start:end+1]
+
+    # Fix an issue where multiple quoted strings follow each other on separate lines
+    # instead of being one long value.
+    # Example: "long_summary": "Text1." \n "Text2."
+    # The second string must NOT be followed by a colon (using negative lookahead).
+    global _multi_line_json_pattern
+
+    previous_str = None
+    while previous_str != json_str:
+        previous_str = json_str
+        # Merge them with \n\n.
+        # m.group(1)[:-1] removes trailing quote, m.group(2)[1:] removes leading quote
+        json_str = re.sub(_multi_line_json_pattern, lambda m: f'{m.group(1)[:-1]}\\n\\n{m.group(2)[1:]}', json_str)
+
+    return json_str
 
 def clean_html(text: str) -> str:
     """

@@ -115,14 +115,19 @@ class NewsFeedApp:
                         if similar_title:
                             logger.info(f"[{theme.name}] [SKIP] Similar article already published: '{similar_title}'")
                             article.short_summary = f"DUPLICATE of {similar_title}"
+                            article.embedding = None # no need to store the embedding for duplicate articles
                         else:
                             # 4. Analyze Summaries
                             await asyncio.to_thread(article.generate_summaries, self.analyzer, self.fetcher, theme.language)
 
                             if not article.is_valid_news:
                                 logger.info(f"[{theme.name}] [REJECTED] Article rejected: {article.reasoning}")
+                                article.embedding = None # no need to store the embedding for rejected articles
 
                             else:
+                                # 4.5 Generate Hashtags
+                                await asyncio.to_thread(article.generate_hashtags, self.analyzer, self.fetcher, theme.language, theme.default_hashtags)
+
                                 # 5. Publish
                                 logger.info(f"[{theme.name}] [PUBLISH] {article.title}")
                                 try:
@@ -164,6 +169,7 @@ class NewsFeedApp:
                 theme=p_data['theme'],
                 short_summary=p_data['short_summary'],
                 long_summary=p_data['long_summary'],
+                hashtags=p_data['hashtags'],
                 full_content=p_data['full_content'],
                 relevance_score=p_data['relevance_score'],
                 importance_score=p_data['importance_score'],
@@ -183,6 +189,7 @@ class NewsFeedApp:
                 if age_hours > self.config.max_article_age_hours:
                     logger.info(f"[{theme.name}] [PENDING] Skipping old article: '{p_article.title}' ({int(age_hours)}h old)")
                     p_article.short_summary = f"SKIPPED: Too old when trying to publish"
+                    p_article.long_summary = None # remove long summary so the article is not processed again
                     self.db.save_article(p_article)
                     continue
             except Exception as e:

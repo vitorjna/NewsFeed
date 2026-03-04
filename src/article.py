@@ -18,6 +18,7 @@ class Article:
     image_url: Optional[str] = None
     short_summary: Optional[str] = None
     long_summary: Optional[str] = None
+    hashtags: Optional[str] = None
     full_content: Optional[str] = None
     relevance_score: Optional[int] = None
     importance_score: Optional[int] = None
@@ -92,6 +93,32 @@ class Article:
         else:
             self.reasoning = summaries.get('rejection_reason', 'No reason provided')
             logger.debug(f"[Summary Generator] '{self.title}': REJECTED: {self.reasoning}")
+
+    def generate_hashtags(self, analyzer: NewsAnalyzer, fetcher: FeedFetcher, language: Optional[str] = None, default_hashtags: Optional[str] = None, force: bool = False) -> None:
+        """
+        Generates hashtags if not present or if forced.
+        """
+        if self.hashtags and not force:
+            logger.debug(f"[Hashtag Generator] Hashtags already available for '{self.title}'")
+            return
+
+        if not self.short_summary:
+            logger.debug(f"[Hashtag Generator] Summaries not available, generating summaries.")
+            self.generate_summaries(analyzer, fetcher, language)
+
+        logger.info(f"[Hashtag Generator] Generating hashtags for '{self.title}'")
+        hashtags = analyzer.generate_hashtags(self.title, self.short_summary, language)
+
+        if len(hashtags) < 3:
+            if default_hashtags:
+                self.hashtags = default_hashtags
+                logger.info(f"[Hashtag Generator] Hashtag generation failed for '{self.title}'. Using defaults: {self.hashtags}")
+            else:
+                self.hashtags = None
+                logger.warning(f"[Hashtag Generator] Hashtag generation failed for '{self.title}' and no defaults provided.")
+        else:
+            self.hashtags = hashtags
+            logger.debug(f"[Hashtag Generator] '{self.title}': {self.hashtags}")
 
     def mark_published(self, published_at: str) -> None:
         self.published_at = published_at

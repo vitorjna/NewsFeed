@@ -202,20 +202,21 @@ class NewsAnalyzer:
 
         # logger.debug(f"[Score Analyzer] LLM message for article scoring: {llm_message}")
 
-        max_retries = 3
-        for attempt in range(max_retries):
+        max_retries = 2
+        response_content = None
+        for attempt in range(1, max_retries + 1):
             try:
                 response = self.primary_client.chat.completions.create(
                     model=self.primary_model,
                     messages=llm_message
                 )
 
-                content = response.choices[0].message.content
-                if not content:
-                    logger.warning(f"[Score Analyzer] Empty response from LLM for '{article_title}' (possibly safety block) - attempt {attempt + 1}")
+                response_content = response.choices[0].message.content
+                if not response_content:
+                    logger.warning(f"[Score Analyzer] Empty response from LLM for '{article_title}' (possibly safety block) - attempt {attempt}")
                     continue
 
-                content = extract_json(content)
+                content = extract_json(response_content)
                 data = json.loads(content, strict=False)
 
                 return AnalysisResult(
@@ -226,9 +227,9 @@ class NewsAnalyzer:
                 )
 
             except Exception as e:
-                logger.error(f"[Score Analyzer] Error analyzing scores for '{article_title}' (attempt {attempt + 1}): {e}")
+                logger.error(f"[Score Analyzer] Error analyzing scores for '{article_title}' (attempt {attempt}): {e}")
                 logger.debug(f"[Score Analyzer] Error analyzing scores. Sent content: {llm_message}")
-                logger.debug(f"[Score Analyzer] Error analyzing scores. Received content: {content}")
+                logger.debug(f"[Score Analyzer] Error analyzing scores. Received content: {response_content}")
 
         return AnalysisResult(
             relevance_score=0,
@@ -244,6 +245,13 @@ class NewsAnalyzer:
         """
         logger.info(f"[Summary Generator] Generating summaries for article: {article_title}")
 
+        if not article_content or len(article_content) < 500:
+            logger.warning(f"[Summary Generator] Not enough content available for article: {article_title}")
+            return {
+                'is_valid_news': False,
+                'rejection_reason': 'No content available'
+            }
+
         lang_instruction = f"The summaries MUST be written in {language}." if language else "The summaries MUST be written in the same language as the news article provided."
 
         system_prompt = f"""
@@ -254,11 +262,9 @@ class NewsAnalyzer:
 
     First, analyze if the content is a valid individual news article.
     REJECT if:
-    - It is video-only content without substantial text.
     - It is a newsletter, a "digest" summarizing multiple different unrelated stories, or a podcast announcement post.
     - It is a generic landing page, login page, or error page.
     - It is a promotional or marketing piece masquerading as news.
-    - The content is too short to generate a meaningful summary.
 
     Output must be strict JSON format with the following keys:
     - is_valid_news: boolean (true if valid news article, false if rejected based on criteria above)
@@ -266,22 +272,21 @@ class NewsAnalyzer:
     - short_summary: string (1-2 sentences, engaging but factual. Suitable for a notification. No emojis)
     - long_summary: string (2-3 short paragraphs, max 2-3 sentences each. Each paragraph MUST start with an appropriate emoji. Focus on the "Who, What, Where, Why" for the content. Do not use headings, only the emoji. Leave an empty line between paragraphs.)
 
+    Source Accuracy (CRITICAL):
+    - Use ONLY the names, formal titles, and roles that appear verbatim in the article text.
+    - If the article mentions only a formal title, do NOT guess or fill in a name. Use the formal title as written in the article.
+    - If the article mentions only a name, do NOT add formal titles like "President", "Chancellor", etc.
+    - NEVER add qualifiers like "former", "ex-", "current" to any title unless the article itself uses that exact word.
+    - Ensure all key entities are preserved accurately as they appear in the text.
+    - Do not hallucinate facts, formal titles, names, events, or anything not present in the source text.
+
     Formatting:
     - DO NOT USE MARKDOWN (no **, __, [], etc.).
     - Use HTML tags ONLY for specific emphasis: <b>bold</b>, <i>italic</i>.
     - Escape any quotes in the text to ensure the JSON is valid.
-    - Ensure all key entities (names, places, organizations) are preserved accurately.
-    - Do not hallucinate facts not present in the source text.
 
-    IMPORTANT: Response must be ONLY the JSON object. Do not include any explanations, greetings, or markdown markers outside the JSON.
+    IMPORTANT: Response must be ONLY the JSON object. Do not include any text outside the JSON.
         """
-
-        if not article_content or len(article_content) < 10:
-            logger.warning(f"[Summary Generator] No content available for article: {article_title}")
-            return {
-                'is_valid_news': False,
-                'rejection_reason': 'No content available'
-            }
 
         user_content = f"Title: {article_title}\nContent/Summary: {article_content}"
 
@@ -309,7 +314,7 @@ class NewsAnalyzer:
 
                 response_content = response.choices[0].message.content
                 if not response_content:
-                    logger.warning(f"[Summary Generator] Empty response from LLM summaries for '{article_title}' (possibly safety block) - attempt {attempt}")
+                    logger.warning(f"[Summary Generator] Empty response from LLM for '{article_title}' (possibly safety block) - attempt {attempt}")
                     continue
 
                 response_content = extract_json(response_content)
@@ -333,3 +338,84 @@ class NewsAnalyzer:
             'is_valid_news': False,
             'rejection_reason': 'Analysis failed'
         }
+
+    def generate_hashtags(self, article_title: str, article_content: str, language: Optional[str] = None) -> str:
+        """
+        Generates hashtags for an article using the secondary LLM.
+        """
+        logger.info(f"[Hashtag Generator] Generating hashtags for article: {article_title}")
+
+        lang_instruction = f"The hashtags MUST be written in {language}." if language else "The hashtags MUST be written in the same language as the news article provided."
+
+        system_prompt = f"""
+    You are a social media expert specializing in Telegram.
+    Your goal is to generate 2 to 3 highly relevant, discoverable hashtags for a news article.
+
+    CRITICAL: {lang_instruction}
+
+    Hashtag Selection Priority (pick in this order until you have 2-3):
+    1. Key Entity: The most prominent person, company, or organization in the story (e.g., #NASA, #Tesla, #EU).
+    2. Core Topic: The broad subject area (e.g., #AI, #ClimateChange, #Elections).
+    3. Geography: Only if the location is central to the story (e.g., #Ukraine, #California).
+
+    Formatting Rules:
+    - Use CamelCase for multi-word hashtags (e.g., #ClimateChange, NOT #climatechange or #climate_change).
+    - Each hashtag must be a single word or CamelCase compound with NO spaces, punctuation, hyphens, or special characters.
+    - Keep each hashtag short: maximum 20 characters.
+
+    AVOID these generic, low-value hashtags:
+    - #News, #BreakingNews, #Update, #Latest, #Breaking, #Alert, #Trending, #World, #Today
+    - Hashtags that merely describe the format (e.g., #Article, #Report, #Story)
+    - Overly specific or conversational hashtags that nobody would search for
+
+    Output format:
+    - Output ONLY the hashtags, separated by a single space.
+    - Do NOT include any other text, explanations, numbering, or markdown.
+        """
+
+        user_content = f"Title: {article_title}\nContent/Summary: {article_content[:2000]}" # Limit content for secondary LLM
+
+        if "google" in str(self.secondary_client.base_url).lower():
+            llm_message = [
+                {"role": "user", "content": f"{system_prompt}\n\nUSER REQUEST:\n{user_content}"}
+            ]
+        else:
+            llm_message = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content}
+            ]
+
+        max_retries = 2
+        response_content = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = self.secondary_client.chat.completions.create(
+                    model=self.secondary_model,
+                    messages=llm_message
+                )
+
+                response_content = response.choices[0].message.content.strip()
+                if not response_content:
+                    logger.warning(f"[Hashtag Generator] Empty response from LLM for '{article_title}' (possibly safety block) - attempt {attempt}")
+                    continue
+
+                hashtags = response_content
+                if hashtags:
+                    # Ensure it looks like hashtags (start with #)
+                    if not hashtags.startswith('#'):
+                        # Split and add # if missing
+                        words = hashtags.split()
+                        hashtags = " ".join([f"#{w.lstrip('#')}" for w in words])
+
+                    logger.debug(f"[Hashtag Generator] Generated: {hashtags}")
+                    return hashtags
+
+            except Exception as e:
+                logger.error(f"[Hashtag Generator] Error generating hashtags for '{article_title}' (attempt {attempt}): {e}")
+                logger.debug(f"[Hashtag Generator] Error generating hashtags. Sent content: {llm_message}")
+                logger.debug(f"[Hashtag Generator] Error generating hashtags. Received content: {response_content}")
+                # if more attempts are available, sleep 5 seconds before retrying (to avoid rate limiting)
+                if attempt < max_retries:
+                    time.sleep(5)
+
+        return ""

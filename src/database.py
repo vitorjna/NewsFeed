@@ -54,6 +54,7 @@ class DatabaseManager:
                 full_content TEXT,
                 short_summary TEXT,
                 long_summary TEXT,
+                hashtags TEXT,
                 embedding TEXT,
                 published_at DATETIME,
                 post_id INTEGER DEFAULT -1,
@@ -139,6 +140,7 @@ class DatabaseManager:
                         full_content = ?,
                         short_summary = ?,
                         long_summary = ?,
+                        hashtags = ?,
                         embedding = ?,
                         published_at = ?,
                         post_id = ?,
@@ -151,6 +153,7 @@ class DatabaseManager:
                       article.full_content,
                       article.short_summary,
                       article.long_summary,
+                      article.hashtags,
                       article.embedding,
                       article.published_at,
                       article.post_id,
@@ -162,11 +165,11 @@ class DatabaseManager:
                     INSERT INTO articles (
                         feed_id, url, title, rss_summary, rss_date,
                         relevance_score, importance_score, urgency_score, reasoning,
-                        full_content, short_summary, long_summary, embedding,
+                        full_content, short_summary, long_summary, hashtags, embedding,
                         published_at, post_id, discussion_post_id
                     ) VALUES (?, ?, ?, ?, ?,
                               ?, ?, ?, ?,
-                              ?, ?, ?, ?,
+                              ?, ?, ?, ?, ?,
                               ?, ?, ?)
                 ''', (
                     article.feed_id,
@@ -181,6 +184,7 @@ class DatabaseManager:
                     article.full_content,
                     article.short_summary,
                     article.long_summary,
+                    article.hashtags,
                     article.embedding,
                     article.published_at,
                     article.post_id,
@@ -384,17 +388,18 @@ class DatabaseManager:
         return datetime.now().strftime(self.timestamp_format)
 
     def get_pending_articles(self, theme: str) -> List[dict]:
-        """Get articles that were selected for publication but failed to publish."""
+        """
+        Get articles that were selected for publication but failed to publish.
+        This is used to retry publishing articles that failed due to network issues or other temporary problems.
+        """
         try:
             conn = sqlite3.connect(self.db_path)
             c = conn.cursor()
-            # Select articles that have summaries but post_id is still -1
-            # We exclude articles marked as duplicates in previous attempts.
             c.execute('''
                 SELECT
                     a.title, a.url, a.rss_summary, a.rss_date,
                     f.url as source_feed, f.name as source_name, f.theme,
-                    a.short_summary, a.long_summary, a.full_content,
+                    a.short_summary, a.long_summary, a.hashtags, a.full_content,
                     a.relevance_score, a.importance_score, a.urgency_score, a.reasoning,
                     a.embedding, a.post_id, a.discussion_post_id, a.feed_id, a.date_seen
                 FROM articles a

@@ -17,6 +17,7 @@ class FeedConfig:
     min_importance_score: Optional[int] = None
     min_urgency_score: Optional[int] = None
     include_image: bool = False
+    default_hashtags: Optional[str] = None
 
 @dataclass
 class LLMConfig:
@@ -106,7 +107,8 @@ def load_config(config_path: str = "config/config.yaml") -> AppConfig:
                 min_relevance_score=theme.get('min_relevance_score', config.min_relevance_score),
                 min_importance_score=theme.get('min_importance_score', config.min_importance_score),
                 min_urgency_score=theme.get('min_urgency_score', config.min_urgency_score),
-                include_image=theme.get('include_image', False)
+                include_image=theme.get('include_image', False),
+                default_hashtags=theme.get('default_hashtags')
             ))
 
         return config
