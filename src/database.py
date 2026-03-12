@@ -17,8 +17,9 @@ class DatabaseManager:
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         conn = sqlite3.connect(self.db_path)
 
-        # Enable foreign keys
+        # Enable foreign keys and auto_vacuum
         conn.execute("PRAGMA foreign_keys = ON;")
+        conn.execute("PRAGMA auto_vacuum = FULL;")
 
         c = conn.cursor()
 
@@ -267,6 +268,20 @@ class DatabaseManager:
                 logger.debug("No old embeddings found to clean up.")
         except Exception as e:
             logger.error(f"Error during embedding cleanup: {e}")
+
+    def optimize(self) -> None:
+        """Run PRAGMA optimize and VACUUM to keep the database healthy."""
+        try:
+            logger.info("Running database optimization (VACUUM & PRAGMA optimize)...")
+            conn = sqlite3.connect(self.db_path)
+            # VACUUM is especially useful after purge_old_entries and cleanup_embeddings
+            # It also applies auto_vacuum setting if it was changed for an existing database
+            conn.execute("VACUUM;")
+            conn.execute("PRAGMA optimize;")
+            conn.close()
+            logger.info("Database optimization completed.")
+        except Exception as e:
+            logger.error(f"Error during database optimization: {e}")
 
     def export_statistics(self, output_path: str, target_date_str: Optional[str] = None) -> None:
         """Export statistics per feed to a text file, with daily and monthly tables."""

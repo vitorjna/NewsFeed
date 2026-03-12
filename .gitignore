@@ -33,12 +33,11 @@ venv.bak/
 
 # Project specific
 data/
+logs/
+stats/
 config/config.yaml
 .idea/
 .vscode/
 
 # Docker
 .docker/
-
-# Logs
-logs/

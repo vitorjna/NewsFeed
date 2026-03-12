@@ -1,5 +1,6 @@
 import asyncio
 import os
+import sys
 import time
 import schedule
 import signal
@@ -98,7 +99,7 @@ class NewsFeedApp:
                             and (article.importance_score + article.urgency_score) >= theme.min_importance_score + theme.min_urgency_score
                         )
                         if is_selected:
-                            logger.debug(f"[{theme.name}] [ANALYSIS] {article.title} is selected due to fuzzy score matching")
+                            logger.info(f"[{theme.name}] [ANALYSIS] {article.title} is selected due to fuzzy score matching (R:{article.relevance_score}, I:{article.importance_score}, U:{article.urgency_score})")
 
                     status = "SELECTED" if is_selected else "SKIPPED"
 
@@ -218,10 +219,50 @@ class NewsFeedApp:
                 logger.error(f"[{theme.name}] [PENDING] Failed to publish '{p_article.title}': {e}")
 
     def _perform_daily_maintenance(self):
-        logger.debug("[Maintenance] Performing daily maintenance tasks...")
+        logger.info("[Maintenance] Starting DB maintenance")
         self.db.purge_old_entries(days_delete_unpublished=30, days_delete_published=90)
         self.db.cleanup_embeddings(days=3)
-        logger.debug("[Maintenance] Daily maintenance tasks completed.")
+        self.db.optimize()
+        logger.info("[Maintenance] DB maintenance completed")
+
+    def _restart_application(self):
+        logger.info("[Maintenance] Restarting application to force log rotation")
+
+        # Determine how the app was started to preserve package context
+        if __package__:
+            # If run as: python -m src.main
+            # We use the module name to avoid relative import errors
+            cmd = [sys.executable, "-m", f"{__package__}.main"] + sys.argv[1:]
+        else:
+            # Fallback for direct script execution
+            cmd = [sys.executable] + sys.argv
+
+        logger.info(f"Restarting with command: {' '.join(cmd)}")
+
+        # Allow logs to flush
+        time.sleep(2)
+
+        if os.name == 'nt':
+            # On Windows, os.execv can be unreliable with file locks and handles.
+            # Using subprocess.Popen followed by sys.exit is the standard way to restart.
+            import subprocess
+            subprocess.Popen(cmd)
+            sys.exit(0)
+        else:
+            # On Unix, os.execv correctly replaces the current process
+            os.execv(sys.executable, cmd)
+
+    def _nightly_routine(self):
+        logger.info("[Maintenance] Starting daily maintenance")
+        self._perform_daily_maintenance()
+
+        # Export stats for yesterday
+        os.makedirs("stats", exist_ok=True)
+        yesterday_str = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+        self.db.export_statistics(f"stats/statistics_{yesterday_str}.txt", target_date_str=yesterday_str)
+
+        self._restart_application()
+        # logger.info("[Maintenance] Nightly routine completed")
 
 
     def run(self):
@@ -246,16 +287,8 @@ class NewsFeedApp:
             lambda: asyncio.run(self.run_cycle())
         )
 
-        # Maintenance tasks (Every day at 03:00 AM)
-        schedule.every().day.at("03:00").do(self._perform_daily_maintenance)
-
-        # Statistics export
-        os.makedirs("logs", exist_ok=True)
-        def export_yesterday_stats():
-            yesterday_str = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-            self.db.export_statistics(f"logs/statistics_{yesterday_str}.txt", target_date_str=yesterday_str)
-
-        schedule.every().day.at("03:05").do(export_yesterday_stats)
+        # Nightly routine (Maintenance, Stats, Restart) at 03:00 AM
+        schedule.every().day.at("03:00").do(self._nightly_routine)
 
         # Cross-promotion schedule
         #schedule.every().day.at("09:00").do(

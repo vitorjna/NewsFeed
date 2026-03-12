@@ -1,5 +1,6 @@
 import json
 import math
+import time
 from openai import OpenAI
 from dataclasses import dataclass
 import datetime
@@ -245,8 +246,10 @@ class NewsAnalyzer:
         """
         logger.info(f"[Summary Generator] Generating summaries for article: {article_title}")
 
-        if not article_content or len(article_content) < 500:
-            logger.warning(f"[Summary Generator] Not enough content available for article: {article_title}")
+        # 700 characters was chosen as a threshold to filter out short articles that are not suitable for summarization
+        # Value obtained by analyzing previously seen articles in the database
+        if not article_content or len(article_content) < 700:
+            logger.warning(f"[Summary Generator] Not enough content available for article: {article_title}. Available: {len(article_content) if article_content else 0} characters")
             return {
                 'is_valid_news': False,
                 'rejection_reason': 'No content available'
@@ -265,6 +268,7 @@ class NewsAnalyzer:
     - It is a newsletter, a "digest" summarizing multiple different unrelated stories, or a podcast announcement post.
     - It is a generic landing page, login page, or error page.
     - It is a promotional or marketing piece masquerading as news.
+    - There is not enough content to summarize.
 
     Output must be strict JSON format with the following keys:
     - is_valid_news: boolean (true if valid news article, false if rejected based on criteria above)
@@ -279,6 +283,7 @@ class NewsAnalyzer:
     - NEVER add qualifiers like "former", "ex-", "current" to any title unless the article itself uses that exact word.
     - Ensure all key entities are preserved accurately as they appear in the text.
     - Do not hallucinate facts, formal titles, names, events, or anything not present in the source text.
+    - NEVER use meta-phrases like "the article mentions", "the publisher reports", "the newspaper asks", or refer to the text, author, or reporting itself. Report the facts directly as an independent observer.
 
     Formatting:
     - DO NOT USE MARKDOWN (no **, __, [], etc.).
@@ -412,10 +417,12 @@ class NewsAnalyzer:
 
             except Exception as e:
                 logger.error(f"[Hashtag Generator] Error generating hashtags for '{article_title}' (attempt {attempt}): {e}")
-                logger.debug(f"[Hashtag Generator] Error generating hashtags. Sent content: {llm_message}")
-                logger.debug(f"[Hashtag Generator] Error generating hashtags. Received content: {response_content}")
+                # logger.debug(f"[Hashtag Generator] Error generating hashtags. Sent content: {llm_message}")
+                # logger.debug(f"[Hashtag Generator] Error generating hashtags. Received content: {response_content}")
+
                 # if more attempts are available, sleep 5 seconds before retrying (to avoid rate limiting)
                 if attempt < max_retries:
                     time.sleep(5)
+                    logger.debug(f"[Hashtag Generator] Retrying for '{article_title}' (attempt {attempt + 1})")
 
         return ""
