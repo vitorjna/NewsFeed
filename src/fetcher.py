@@ -132,7 +132,7 @@ class FeedFetcher:
                 feed = feedparser.parse(feed_url)
                 feed_name = feed.feed.title
 
-                feed_id = self.db.get_or_create_feed(feed_name, feed_url, theme_name)
+                feed_id, feed_name = self.db.get_or_create_feed(feed_name, feed_url, theme_name)
                 if not feed_id:
                     logger.error(f"[Feed Fetcher] Failed to resolve feed for {feed_url}")
                     continue

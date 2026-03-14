@@ -76,29 +76,30 @@ class DatabaseManager:
         conn.commit()
         conn.close()
 
-    def get_or_create_feed(self, name: str, url: str, theme: str) -> Optional[int]:
-        """Gets the feed ID, creating it if it doesn't exist."""
+    def get_or_create_feed(self, feed_name: str, feed_url: str, feed_theme: str) -> Optional[int, str]:
+        """Gets the feed ID and name from the database, or creates it if it doesn't exist."""
         try:
             conn = sqlite3.connect(self.db_path)
             c = conn.cursor()
 
             # Try to find existing
-            c.execute('SELECT id FROM feeds WHERE url = ? AND theme = ?', (url, theme))
+            c.execute('SELECT id, name FROM feeds WHERE url = ? AND theme = ?', (feed_url, feed_theme))
             result = c.fetchone()
 
             if result:
                 feed_id = result[0]
+                feed_name = result[1]
             else:
                 # Insert new
-                c.execute('INSERT INTO feeds (name, url, theme) VALUES (?, ?, ?)', (name, url, theme))
+                c.execute('INSERT INTO feeds (name, url, theme) VALUES (?, ?, ?)', (feed_name, feed_url, feed_theme))
                 feed_id = c.lastrowid
                 conn.commit()
 
             conn.close()
-            return feed_id
+            return feed_id, feed_name
         except Exception as e:
             logger.error(f"Error getting/creating feed: {e}")
-            return None
+            return None, None
 
     def is_seen(self, url: str, feed_id: int) -> bool:
         """Check if URL for a specific feed has been seen before."""
