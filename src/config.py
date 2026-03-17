@@ -24,15 +24,18 @@ class LLMConfig:
     primary_api_key: str
     primary_base_url: str
     primary_model: str
+    primary_timeout: int
     secondary_api_key: str
     secondary_base_url: str
     secondary_model: str
+    secondary_timeout: int
 
 @dataclass
 class EmbeddingConfig:
     embedding_api_key: str
     embedding_base_url: str
     embedding_model: str
+    embedding_timeout: int
 
 @dataclass
 class AppConfig:
@@ -69,15 +72,18 @@ def load_config(config_path: str = "config/config.yaml") -> AppConfig:
             primary_api_key=raw_config['llm'].get('primary_api_key', 'not-needed'),
             primary_base_url=raw_config['llm'].get('primary_base_url', "http://localhost:1234/v1"),
             primary_model=raw_config['llm'].get('primary_model', "gemma-3-27b-it"),
+            primary_timeout=raw_config['llm'].get('primary_timeout', 120),
             secondary_api_key=raw_config['llm'].get('secondary_api_key', 'not-needed'),
             secondary_base_url=raw_config['llm'].get('secondary_base_url', "http://localhost:1234/v1"),
-            secondary_model=raw_config['llm'].get('secondary_model', "gemma-3-12b-it")
+            secondary_model=raw_config['llm'].get('secondary_model', "gemma-3-12b-it"),
+            secondary_timeout=raw_config['llm'].get('secondary_timeout', 60)
         )
 
         emb_conf = EmbeddingConfig(
             embedding_api_key=raw_config.get('embeddings', {}).get('embedding_api_key', 'not-needed'),
             embedding_base_url=raw_config.get('embeddings', {}).get('embedding_base_url', "http://localhost:1234/v1"),
-            embedding_model=raw_config.get('embeddings', {}).get('embedding_model', "text-embedding-3-small")
+            embedding_model=raw_config.get('embeddings', {}).get('embedding_model', "text-embedding-3-small"),
+            embedding_timeout=raw_config.get('embeddings', {}).get('embedding_timeout', 60)
         )
 
         themes = []

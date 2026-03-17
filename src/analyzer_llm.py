@@ -5,7 +5,7 @@ from openai import OpenAI
 from dataclasses import dataclass
 import datetime
 from typing import Optional, Dict
-from .utils import setup_logger, extract_json
+from .utils import setup_logger, extract_json, extract_retry_delay
 from .config import LLMConfig, EmbeddingConfig
 from difflib import SequenceMatcher
 
@@ -23,21 +23,24 @@ class NewsAnalyzer:
         # Primary client for main analysis and summaries
         self.primary_client = OpenAI(
             api_key=llm_config.primary_api_key,
-            base_url=llm_config.primary_base_url
+            base_url=llm_config.primary_base_url,
+            timeout=llm_config.primary_timeout
         )
         self.primary_model = llm_config.primary_model
 
-        # Secondary client for fast tasks like duplicate checks
+        # Secondary client for fast tasks
         self.secondary_client = OpenAI(
             api_key=llm_config.secondary_api_key,
-            base_url=llm_config.secondary_base_url
+            base_url=llm_config.secondary_base_url,
+            timeout=llm_config.secondary_timeout
         )
         self.secondary_model = llm_config.secondary_model
 
         # Embedding client
         self.embedding_client = OpenAI(
             api_key=embedding_config.embedding_api_key,
-            base_url=embedding_config.embedding_base_url
+            base_url=embedding_config.embedding_base_url,
+            timeout=embedding_config.embedding_timeout
         )
         self.embedding_model = embedding_config.embedding_model
 
@@ -161,7 +164,7 @@ class NewsAnalyzer:
                 relevance_score=0,
                 importance_score=0,
                 urgency_score=0,
-                reasoning="No content provided"
+                reasoning="Scoring: No content provided"
             )
 
         today_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
@@ -227,10 +230,16 @@ class NewsAnalyzer:
                     reasoning=data.get('reasoning', 'No reasoning provided')
                 )
 
-            except Exception as e:
-                logger.error(f"[Score Analyzer] Error analyzing scores for '{article_title}' (attempt {attempt}): {e}")
+            except Exception as exc:
+                logger.error(f"[Score Analyzer] Error analyzing scores for '{article_title}' (attempt {attempt}): {exc}")
                 logger.debug(f"[Score Analyzer] Error analyzing scores. Sent content: {llm_message}")
                 logger.debug(f"[Score Analyzer] Error analyzing scores. Received content: {response_content}")
+
+                if attempt < max_retries:
+                    delay = extract_retry_delay(exc)
+                    wait_time = min(delay + 1 if delay > 0 else 5, 60) # sleep 1 second more than the delay, but no more than 60 seconds
+                    logger.debug(f"[Score Analyzer] Retrying for '{article_title}' in {wait_time}s (attempt {attempt + 1})")
+                    time.sleep(wait_time)
 
         return AnalysisResult(
             relevance_score=0,
@@ -245,15 +254,6 @@ class NewsAnalyzer:
         Returns a dictionary with 'short_summary', 'long_summary', and validity flags.
         """
         logger.info(f"[Summary Generator] Generating summaries for article: {article_title}")
-
-        # 700 characters was chosen as a threshold to filter out short articles that are not suitable for summarization
-        # Value obtained by analyzing previously seen articles in the database
-        if not article_content or len(article_content) < 700:
-            logger.warning(f"[Summary Generator] Not enough content available for article: {article_title}. Available: {len(article_content) if article_content else 0} characters")
-            return {
-                'is_valid_news': False,
-                'rejection_reason': 'No content available'
-            }
 
         lang_instruction = f"The summaries MUST be written in {language}." if language else "The summaries MUST be written in the same language as the news article provided."
 
@@ -332,10 +332,16 @@ class NewsAnalyzer:
                     'rejection_reason': data.get('rejection_reason', '')
                 }
 
-            except Exception as e:
-                logger.error(f"[Summary Generator] Error generating summaries for '{article_title}' (attempt {attempt}): {e}")
+            except Exception as exc:
+                logger.error(f"[Summary Generator] Error generating summaries for '{article_title}' (attempt {attempt}): {exc}")
                 logger.debug(f"[Summary Generator] Error generating summaries. Sent content: {llm_message}")
                 logger.debug(f"[Summary Generator] Error generating summaries. Received content: {response_content}")
+
+                if attempt < max_retries:
+                    delay = extract_retry_delay(exc)
+                    wait_time = min(delay + 1 if delay > 0 else 5, 60) # sleep 1 second more than the delay, but no more than 60 seconds
+                    logger.debug(f"[Summary Generator] Retrying for '{article_title}' in {wait_time}s (attempt {attempt + 1})")
+                    time.sleep(wait_time)
 
         return {
             'short_summary': '',
@@ -406,23 +412,39 @@ class NewsAnalyzer:
 
                 hashtags = response_content
                 if hashtags:
-                    # Ensure it looks like hashtags (start with #)
-                    if not hashtags.startswith('#'):
-                        # Split and add # if missing
+                    # Clean up: ensure multi-word hashtags are not separated by spaces
+                    if '#' in hashtags:
+                        parts = hashtags.split('#')
+                        cleaned_parts = []
+                        # Handle text before the first # (treat as separate words/hashtags)
+                        if parts[0].strip():
+                            cleaned_parts.extend(parts[0].split())
+                        
+                        # Handle parts starting with # (join multi-word parts)
+                        for part in parts[1:]:
+                            # Remove all whitespace within the hashtag
+                            cleaned = "".join(part.split())
+                            if cleaned:
+                                cleaned_parts.append(cleaned)
+                        
+                        hashtags = " ".join([f"#{p}" for p in cleaned_parts])
+                    else:
+                        # No hashtags present, treat every word as a separate hashtag
                         words = hashtags.split()
                         hashtags = " ".join([f"#{w.lstrip('#')}" for w in words])
 
                     logger.debug(f"[Hashtag Generator] Generated: {hashtags}")
                     return hashtags
 
-            except Exception as e:
-                logger.error(f"[Hashtag Generator] Error generating hashtags for '{article_title}' (attempt {attempt}): {e}")
+            except Exception as exc:
+                logger.error(f"[Hashtag Generator] Error generating hashtags for '{article_title}' (attempt {attempt}): {exc}")
                 # logger.debug(f"[Hashtag Generator] Error generating hashtags. Sent content: {llm_message}")
                 # logger.debug(f"[Hashtag Generator] Error generating hashtags. Received content: {response_content}")
 
-                # if more attempts are available, sleep 5 seconds before retrying (to avoid rate limiting)
                 if attempt < max_retries:
-                    time.sleep(5)
-                    logger.debug(f"[Hashtag Generator] Retrying for '{article_title}' (attempt {attempt + 1})")
+                    delay = extract_retry_delay(exc)
+                    wait_time = min(delay + 1 if delay > 0 else 5, 60) # sleep 1 second more than the delay, but no more than 60 seconds
+                    logger.debug(f"[Hashtag Generator] Retrying for '{article_title}' in {wait_time}s (attempt {attempt + 1})")
+                    time.sleep(wait_time)
 
         return ""

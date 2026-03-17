@@ -15,6 +15,7 @@ from .analyzer_llm import NewsAnalyzer
 from .publisher import TelegramPublisher
 from .bot_manager import TelegramBotManager
 
+HEARTBEAT_FILE = "/tmp/newsfeed_heartbeat"
 logger = setup_logger("Main")
 
 class NewsFeedApp:
@@ -265,6 +266,13 @@ class NewsFeedApp:
         # logger.info("[Maintenance] Nightly routine completed")
 
 
+    def _write_heartbeat(self):
+        try:
+            with open(HEARTBEAT_FILE, "w") as f:
+                f.write(str(time.time()))
+        except Exception:
+            pass
+
     def run(self):
         """
         Starts the scheduler loop.
@@ -279,6 +287,13 @@ class NewsFeedApp:
         if self.config.dev_mode:
             logger.info("Development mode enabled")
 
+        # Write initial heartbeat before anything else
+        try:
+            with open(HEARTBEAT_FILE, "w") as f:
+                f.write(str(time.time()))
+        except Exception:
+            pass
+
         # Initial run
         asyncio.run(self.run_cycle())
 
@@ -289,6 +304,9 @@ class NewsFeedApp:
 
         # Nightly routine (Maintenance, Stats, Restart) at 03:00 AM
         schedule.every().day.at("03:00").do(self._nightly_routine)
+
+        # Heartbeat schedule
+        schedule.every(1).minutes.do(self._write_heartbeat)
 
         # Cross-promotion schedule
         #schedule.every().day.at("09:00").do(

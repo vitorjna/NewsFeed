@@ -8,7 +8,18 @@ from datetime import datetime
 
 _shared_file_handler = None
 _shared_stream_handler = None
-_multi_line_json_pattern = re.compile(r'("[^"]*")\s*\n\s*("[^"]*")(?!\s*:)')
+_MULTI_LINE_JSON_PATTERN = re.compile(r'("[^"]*")\s*\n\s*("[^"]*")(?!\s*:)')
+_HTML_TAG_PATTERN = re.compile(r'<[^>]*>')
+_WHITESPACE_PATTERN = re.compile(r'\s+')
+
+_MD_BOLD_STAR_PATTERN = re.compile(r'\*\*(.*?)\*\*')
+_MD_BOLD_UNDERSCORE_PATTERN = re.compile(r'__(.*?)__')
+_MD_ITALIC_STAR_PATTERN = re.compile(r'\*(.*?)\*')
+_MD_ITALIC_UNDERSCORE_PATTERN = re.compile(r'_(.*?)_')
+_MD_LINK_PATTERN = re.compile(r'\[(.*?)\]\((.*?)\)')
+
+_RETRY_DELAY_PATTERN_1 = re.compile(r'retry in ([\d\.]+)s', re.IGNORECASE)
+_RETRY_DELAY_PATTERN_2 = re.compile(r"['\"]retryDelay['\"]\s*:\s*['\"]([\d\.]+)s['\"]")
 
 def setup_logger(name: str = "NewsFeedApp", level=logging.INFO):
     """
@@ -69,14 +80,12 @@ def extract_json(content: str) -> str:
     # instead of being one long value.
     # Example: "long_summary": "Text1." \n "Text2."
     # The second string must NOT be followed by a colon (using negative lookahead).
-    global _multi_line_json_pattern
-
     previous_str = None
     while previous_str != json_str:
         previous_str = json_str
         # Merge them with \n\n.
         # m.group(1)[:-1] removes trailing quote, m.group(2)[1:] removes leading quote
-        json_str = re.sub(_multi_line_json_pattern, lambda m: f'{m.group(1)[:-1]}\\n\\n{m.group(2)[1:]}', json_str)
+        json_str = _MULTI_LINE_JSON_PATTERN.sub(lambda m: f'{m.group(1)[:-1]}\\n\\n{m.group(2)[1:]}', json_str)
 
     return json_str
 
@@ -88,11 +97,11 @@ def clean_html(text: str) -> str:
     if not text:
         return ""
     # Remove HTML tags
-    clean = re.sub(r'<[^>]*>', ' ', text)
+    clean = _HTML_TAG_PATTERN.sub(' ', text)
     # Unescape HTML entities
     clean = html.unescape(clean)
     # Normalize whitespace
-    clean = re.sub(r'\s+', ' ', clean).strip()
+    clean = _WHITESPACE_PATTERN.sub(' ', clean).strip()
     return clean
 
 def format_markdown_as_html(text: str) -> str:
@@ -107,17 +116,36 @@ def format_markdown_as_html(text: str) -> str:
     # This is tricky. Let's do simple MD to HTML conversion first.
 
     # Bold: **text** -> <b>text</b>
-    text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
+    text = _MD_BOLD_STAR_PATTERN.sub(r'<b>\1</b>', text)
     # Bold: __text__ -> <b>text</b>
-    text = re.sub(r'__(.*?)__', r'<b>\1</b>', text)
+    text = _MD_BOLD_UNDERSCORE_PATTERN.sub(r'<b>\1</b>', text)
 
     # Italic: *text* -> <i>text</i>
     # We use a lazy match and ensure it's not part of a tag
-    text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', text)
+    text = _MD_ITALIC_STAR_PATTERN.sub(r'<i>\1</i>', text)
     # Italic: _text_ -> <i>text</i>
-    text = re.sub(r'_(.*?)_', r'<i>\1</i>', text)
+    text = _MD_ITALIC_UNDERSCORE_PATTERN.sub(r'<i>\1</i>', text)
 
     # Links: [text](url) -> <a href="url">text</a>
-    text = re.sub(r'\[(.*?)\]\((.*?)\)', r'<a href="\2">\1</a>', text)
+    text = _MD_LINK_PATTERN.sub(r'<a href="\2">\1</a>', text)
 
     return text
+
+def extract_retry_delay(error_message) -> float:
+    """
+    Parses a rate limit error message to extract the wait time.
+    Returns the wait time in seconds, or 0.0 if not found.
+    """
+    error_str = str(error_message)
+
+    # Check for "retry in 44.793077872s"
+    match = _RETRY_DELAY_PATTERN_1.search(error_str)
+    if match:
+        return float(match.group(1))
+
+    # Check for "retryDelay": "44s" or 'retryDelay': '44s'
+    match = _RETRY_DELAY_PATTERN_2.search(error_str)
+    if match:
+        return float(match.group(1))
+
+    return 0.0

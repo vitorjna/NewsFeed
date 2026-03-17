@@ -31,6 +31,27 @@ class Article:
     post_id: int = -1
     discussion_post_id: int = -1
 
+    def check_content_length(self, phase: str) -> Optional[str]:
+        """
+        Checks if the full content length is within acceptable bounds.
+        Returns a rejection reason if invalid, or None if valid.
+        """
+        content_len = len(self.full_content) if self.full_content else 0
+        action_word = "Scoring" if phase == "Score Analyzer" else "Summarizing"
+
+        # 700 characters was chosen as a threshold to filter out short articles that are not suitable for summarization
+        # Value obtained by analyzing previously seen articles in the database
+        if content_len < 700:
+            logger.warning(f"[{phase}] Not enough content available for article: '{self.title}'. Available: {content_len} characters")
+            return f"{action_word}: Not enough content available"
+
+        # 20000 characters was chosen as a threshold to filter out too in depth articles and reporting that don't generally fit the channel's purpose
+        if content_len > 20000:
+            logger.warning(f"[{phase}] Article content is too long: {content_len} characters")
+            return f"{action_word}: Article content is too long"
+
+        return None
+
     def fetch_full_content(self, fetcher: FeedFetcher, force: bool = False) -> None:
         """
         Fetches full text if not present or if forced.
@@ -60,10 +81,22 @@ class Article:
         if not self.rss_summary or len(self.rss_summary) < 20:
             logger.debug(f"[Score Analyzer] RSS summary missing or too short for '{self.title}', fetching full content before analysis.")
             self.fetch_full_content(fetcher)
+
+            rejection_reason = self.check_content_length("Score Analyzer")
+            if rejection_reason:
+                self.relevance_score = 0
+                self.importance_score = 0
+                self.urgency_score = 0
+                self.reasoning = rejection_reason
+                self.is_valid_news = False
+                logger.debug(f"[Score Analyzer] '{self.title}': REJECTED: {self.reasoning}")
+                return
+
             result = analyzer.analyze_scores(self.title, self.full_content, prompt_focus)
 
         else:
-            result = analyzer.analyze_scores(self.title, self.rss_summary, prompt_focus)
+            # some publishers have the full content in the rss summary, so for the scoring we should limit it
+            result = analyzer.analyze_scores(self.title, self.rss_summary[:2000], prompt_focus)
 
         self.relevance_score = result.relevance_score
         self.importance_score = result.importance_score
@@ -83,6 +116,14 @@ class Article:
             self.fetch_full_content(fetcher)
 
         logger.info(f"[Summary Generator] Generating summaries for '{self.title}'")
+
+        rejection_reason = self.check_content_length("Summary Generator")
+        if rejection_reason:
+            self.is_valid_news = False
+            self.reasoning = rejection_reason
+            logger.debug(f"[Summary Generator] '{self.title}': REJECTED: {self.reasoning}")
+            return
+
         summaries = analyzer.generate_summaries(self.title, self.full_content, language)
 
         self.is_valid_news = summaries.get('is_valid_news', True)
