@@ -391,7 +391,7 @@ class NewsAnalyzer:
 
         user_content = f"Title: {article_title}\nContent/Summary: {article_content[:2000]}" # Limit content for secondary LLM
 
-        if "google" in str(self.primary_client.base_url).lower():
+        if "google" in str(self.secondary_client.base_url).lower():
             llm_message = [
                 {"role": "user", "content": f"{system_prompt}\n\nUSER REQUEST:\n{user_content}"}
             ]
@@ -405,8 +405,8 @@ class NewsAnalyzer:
         response_content = None
         for attempt in range(1, max_retries + 1):
             try:
-                response = self.primary_client.chat.completions.create(
-                    model=self.primary_model,
+                response = self.secondary_client.chat.completions.create(
+                    model=self.secondary_model,
                     messages=llm_message
                 )
 
