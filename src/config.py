@@ -49,6 +49,8 @@ class AppConfig:
     min_importance_score: int
     min_urgency_score: int
     themes: List[FeedConfig]
+    log_retention_days: int = 10
+    stats_retention_days: int = 30
     debug: bool = False
     dev_mode: bool = False
 
@@ -99,6 +101,8 @@ def load_config(config_path: str = "config/config.yaml") -> AppConfig:
             min_importance_score=raw_config.get('min_importance_score', 7),
             min_urgency_score=raw_config.get('min_urgency_score', 7),
             themes=themes,
+            log_retention_days=raw_config.get('log_retention_days', 10),
+            stats_retention_days=raw_config.get('stats_retention_days', 30),
             debug=raw_config.get('debug', False),
             dev_mode=raw_config.get('dev_mode', False)
         )

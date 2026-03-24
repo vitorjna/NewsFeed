@@ -58,7 +58,7 @@ class NewsAnalyzer:
             logger.error(f"Error generating embedding: {e}")
             return []
 
-    def _fallback_sequence_matcher(self, article, recent_articles: list, title_threshold: float = 0.55, summary_threshold: float = 0.5) -> Optional[str]:
+    def _fallback_sequence_matcher(self, article, recent_articles: list, title_threshold: float = 0.55, summary_threshold: float = 0.5) -> Optional[tuple]:
         try:
             highest_title_similarity = 0
             highest_summary_similarity = 0
@@ -68,11 +68,12 @@ class NewsAnalyzer:
             for row in recent_articles:
                 existing_title = row[0]
                 existing_summary = row[1]
+                existing_published_at = row[3] if len(row) > 3 else None
                 title_sim = SequenceMatcher(None, article.title.lower(), existing_title.lower()).ratio()
 
                 if title_sim >= title_threshold:
                     logger.info(f"[DEDUP SeqMatcher] Match by TITLE: {title_sim:.2f} >= {title_threshold}, New: '{article.title}', Matching: '{existing_title}'")
-                    return existing_title
+                    return (existing_title, existing_published_at)
 
                 elif title_sim > highest_title_similarity:
                     highest_title_similarity = title_sim
@@ -83,7 +84,7 @@ class NewsAnalyzer:
 
                     if summary_sim >= summary_threshold:
                         logger.info(f"[DEDUP SeqMatcher] Match by SUMMARY: {summary_sim:.2f} >= {summary_threshold}, New: '{article.title}', Matching: '{existing_title}'")
-                        return existing_title
+                        return (existing_title, existing_published_at)
 
                     elif summary_sim > highest_summary_similarity:
                         highest_summary_similarity = summary_sim
@@ -99,16 +100,17 @@ class NewsAnalyzer:
             logger.error(f"[DEDUP SeqMatcher] Error: {e}")
             return None
 
-    def check_for_duplicate(self, article: Article, recent_articles: list, similarity_threshold: float = 0.74) -> Optional[str]:
+    def check_for_duplicate(self, article: Article, recent_articles: list, similarity_threshold: float = 0.74) -> Optional[tuple]:
         """
         Uses text embeddings to check if a new article covers the exact same story as any recently published ones.
         Falls back to a sequence matcher if embeddings are not available.
         The value 0.74 is the optimal value found by testing past articles and analyzing where duplicates started being falsely flagged too often.
+        Returns a (title, published_at) tuple if a duplicate is found, or None.
         """
         if not recent_articles:
             return None
 
-        logger.info(f"[DEDUP] Checking for duplicate for: {article.title}")
+        logger.debug(f"[DEDUP] Checking for duplicate for: {article.title}")
 
         if not article.embedding:
             text_to_embed = f"{article.title} {article.rss_summary[:100] or ''}".strip()
@@ -121,10 +123,12 @@ class NewsAnalyzer:
                 new_emb = json.loads(article.embedding)
                 highest_sim = 0
                 matching_title = None
+                matching_published_at = None
 
                 for row in recent_articles:
                     existing_title = row[0]
                     existing_emb_str = row[2] if len(row) > 2 else None
+                    existing_published_at = row[3] if len(row) > 3 else None
                     if existing_emb_str:
                         existing_emb = json.loads(existing_emb_str)
                         norm_new = math.sqrt(sum(a * a for a in new_emb))
@@ -137,10 +141,11 @@ class NewsAnalyzer:
                         if sim > highest_sim:
                             highest_sim = sim
                             matching_title = existing_title
+                            matching_published_at = existing_published_at
 
                 if highest_sim >= similarity_threshold:
                     logger.info(f"[DEDUP Embeds] POSITIVE (sim: {highest_sim:.3f}). '{article.title}' matches '{matching_title}'")
-                    return matching_title
+                    return (matching_title, matching_published_at)
                 else:
                     logger.info(f"[DEDUP Embeds] NEGATIVE (highest sim: {highest_sim:.3f}). '{article.title}' does not match '{matching_title}'")
                     return None
@@ -156,7 +161,7 @@ class NewsAnalyzer:
         """
         Analyzes an article for relevance, importance, and urgency.
         """
-        logger.info(f"[Score Analyzer] Analyzing scores for article: {article_title}")
+        logger.debug(f"[Score Analyzer] Analyzing scores for article: {article_title}")
 
         if not article_title and not article_content:
             logger.warning(f"[Score Analyzer] No content provided for article: {article_title}")
@@ -386,7 +391,7 @@ class NewsAnalyzer:
 
         user_content = f"Title: {article_title}\nContent/Summary: {article_content[:2000]}" # Limit content for secondary LLM
 
-        if "google" in str(self.secondary_client.base_url).lower():
+        if "google" in str(self.primary_client.base_url).lower():
             llm_message = [
                 {"role": "user", "content": f"{system_prompt}\n\nUSER REQUEST:\n{user_content}"}
             ]
@@ -400,8 +405,8 @@ class NewsAnalyzer:
         response_content = None
         for attempt in range(1, max_retries + 1):
             try:
-                response = self.secondary_client.chat.completions.create(
-                    model=self.secondary_model,
+                response = self.primary_client.chat.completions.create(
+                    model=self.primary_model,
                     messages=llm_message
                 )
 
@@ -419,14 +424,14 @@ class NewsAnalyzer:
                         # Handle text before the first # (treat as separate words/hashtags)
                         if parts[0].strip():
                             cleaned_parts.extend(parts[0].split())
-                        
+
                         # Handle parts starting with # (join multi-word parts)
                         for part in parts[1:]:
                             # Remove all whitespace within the hashtag
                             cleaned = "".join(part.split())
                             if cleaned:
                                 cleaned_parts.append(cleaned)
-                        
+
                         hashtags = " ".join([f"#{p}" for p in cleaned_parts])
                     else:
                         # No hashtags present, treat every word as a separate hashtag

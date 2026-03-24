@@ -17,6 +17,7 @@ import sys
 import os
 import sqlite3
 import argparse
+import re
 from datetime import datetime
 
 
@@ -52,6 +53,22 @@ def get_daily_stats(cursor: sqlite3.Cursor, date_str: str) -> list:
         WHERE DATE(a.date_seen) = ? OR DATE(a.published_at) = ?
         GROUP BY f.theme, f.name
         ORDER BY f.theme, f.name
+    ''', (date_str, date_str))
+    return cursor.fetchall()
+
+
+def get_theme_stats(cursor: sqlite3.Cursor, date_str: str) -> list:
+    """Get total seen and published articles per theme for a given day."""
+    cursor.execute('''
+        SELECT
+            f.theme,
+            COUNT(a.id) AS total_seen,
+            SUM(CASE WHEN a.post_id != -1 THEN 1 ELSE 0 END) AS total_published
+        FROM articles a
+        JOIN feeds f ON a.feed_id = f.id
+        WHERE DATE(a.date_seen) = ? OR DATE(a.published_at) = ?
+        GROUP BY f.theme
+        ORDER BY f.theme
     ''', (date_str, date_str))
     return cursor.fetchall()
 
@@ -139,30 +156,61 @@ def write_table(f, title: str, rows: list) -> None:
     f.write("-" * 100 + "\n\n")  # closing separator after last theme
 
 
+def write_theme_stats(rows: list, date_str: str, directory: str) -> None:
+    """Append theme-level statistics to historical theme files."""
+
+    def slugify(text: str) -> str:
+        text = text.lower()
+        text = re.sub(r'[^a-z0-9]+', '_', text)
+        return text.strip('_')
+
+    os.makedirs(directory, exist_ok=True)
+    for theme, seen, pub in rows:
+        filename = f"daily_{slugify(theme)}.txt"
+        output_path = os.path.join(directory, filename)
+        file_exists = os.path.exists(output_path)
+        rate = (pub * 100.0 / seen) if seen > 0 else 0.0
+
+        with open(output_path, "a", encoding="utf-8") as f:
+            if not file_exists:
+                f.write(f"{'Date':<10} | {'Seen':<5} | {'Pub':<5} | {'Rate':<6}\n")
+                f.write("-" * 35 + "\n")
+
+            f.write(f"{date_str:<10} | {seen:<5} | {pub:<5} | {rate:<5.1f}%\n")
+    print(f"Daily theme totals exported to {directory}")
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
-def export_statistics(db_path: str, target_date_str: str, output_path: str) -> None:
-    """Run all queries and write the statistics file."""
+def export_statistics(db_path: str, target_date_str: str, output_path: str, themes_dir: str | None = None) -> None:
+    """Run all queries and write the statistics files."""
     conn = open_readonly(db_path)
     try:
         cursor = conn.cursor()
 
-        daily_rows = get_daily_stats(cursor, target_date_str)
-        monthly_rows = get_monthly_stats(cursor, target_date_str)
+        if themes_dir:
+            # Only export theme-level statistics
+            theme_rows = get_theme_stats(cursor, target_date_str)
+            write_theme_stats(theme_rows, target_date_str, themes_dir)
+        else:
+            # Only export regular feed-level statistics
+            daily_rows = get_daily_stats(cursor, target_date_str)
+            monthly_rows = get_monthly_stats(cursor, target_date_str)
 
-        os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+            os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
-        with open(output_path, "w", encoding="utf-8") as f:
-            f.write(
-                f"NewsFeed Statistics - Exported on "
-                f"{datetime.now().strftime(TIMESTAMP_FORMAT)}\n"
-            )
-            f.write("=" * 100 + "\n\n")
+            with open(output_path, "w", encoding="utf-8") as f:
+                f.write(
+                    f"NewsFeed Statistics - Exported on "
+                    f"{datetime.now().strftime(TIMESTAMP_FORMAT)}\n"
+                )
+                f.write("=" * 100 + "\n\n")
 
-            write_table(f, "DAILY STATISTICS (Last 24 Hours)", daily_rows)
-            write_table(f, "MONTHLY STATISTICS (Last 30 Days)", monthly_rows)
+                write_table(f, "DAILY STATISTICS (Last 24 Hours)", daily_rows)
+                write_table(f, "MONTHLY STATISTICS (Last 30 Days)", monthly_rows)
 
-        print(f"Statistics exported to {output_path}")
+            print(f"Feed-level statistics exported to {output_path}")
+
     finally:
         conn.close()
 
@@ -185,6 +233,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="data/news_feed.db",
         help="Path to the SQLite database.  Defaults to data/news_feed.db",
     )
+    parser.add_argument(
+        "--themes",
+        nargs='?',
+        const='stats',
+        default=None,
+        help="Also export daily theme totals to the specified directory (defaults to 'stats' if flag is present).",
+    )
     return parser.parse_args(argv)
 
 
@@ -205,7 +260,7 @@ def main(argv: list[str] | None = None) -> None:
 
     output_path = args.output or f"stats/statistics_{args.date}.txt"
 
-    export_statistics(args.db, args.date, output_path)
+    export_statistics(args.db, args.date, output_path, themes_dir=args.themes)
 
 
 if __name__ == "__main__":

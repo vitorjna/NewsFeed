@@ -8,26 +8,31 @@ llm:
   primary_api_key: "YOUR_PRIMARY_API_KEY"
   primary_base_url: "https://generativelanguage.googleapis.com/v1beta/openai/"
   primary_model: "gemma-3-27b-it"
+  primary_timeout: 90
   secondary_api_key: "YOUR_SECONDARY_API_KEY"
   secondary_base_url: "https://generativelanguage.googleapis.com/v1beta/openai/"
   secondary_model: "gemma-3-12b-it"
+  secondary_timeout: 120
 
 # Embedding Configuration: used for duplicate detection and similarity searches.
 embeddings:
   embedding_api_key: "YOUR_EMBEDDING_API_KEY"
   embedding_base_url: "https://generativelanguage.googleapis.com/v1beta/openai/"
   embedding_model: "gemini-embedding-001"
+  embedding_timeout: 60
 
 # Global Application Settings
 fetch_interval_minutes: 15
-max_article_age_hours: 6
+max_article_age_hours: 8
+log_retention_days: 10
+stats_retention_days: 30
 database_path: "data/news_feed.db"
 debug: true
 dev_mode: false
 
 # Posting Thresholds: An article is posted if all scores are met, or if, between importance and urgency, one is 1 point below, but the other is at least 1 point above.
 min_relevance_score: 8
-min_importance_score: 7
+min_importance_score: 8
 min_urgency_score: 7
 
 # Themes and Channels: Define topics, target channels, and source RSS feeds.
@@ -88,6 +93,9 @@ themes:
       REJECT if the content is primarily a video or audio with little text.
       REJECT newsletters, daily briefings, 'roundups', or articles summarizing multiple unrelated topics.
       Focus on hard science and significant advancements.
+    min_relevance_score: 8
+    min_importance_score: 7
+    min_urgency_score: 7
 
   - name: "Tech News"
     channel_id: "-100_YOUR_CHANNEL_ID"
@@ -128,6 +136,3 @@ themes:
       REJECT if the content is primarily a video or audio with little text.
       REJECT articles with spoilers or plot details, newsletters, daily briefings, 'roundups', or articles summarizing multiple unrelated topics.
       High importance means industry-defining moments or cultural phenomena.
-    min_relevance_score: 8
-    min_importance_score: 8
-    min_urgency_score: 7

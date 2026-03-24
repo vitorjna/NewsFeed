@@ -204,7 +204,7 @@ class DatabaseManager:
             conn = sqlite3.connect(self.db_path)
             c = conn.cursor()
             c.execute('''
-                SELECT a.title, a.rss_summary, a.embedding
+                SELECT a.title, a.rss_summary, a.embedding, a.published_at
                 FROM articles a
                 JOIN feeds f ON a.feed_id = f.id
                 WHERE f.theme = ? AND a.post_id != -1 AND a.published_at > datetime('now', ?)
@@ -399,6 +399,57 @@ class DatabaseManager:
             logger.error(f"Error exporting statistics: {e}")
             import traceback
             logger.error(traceback.format_exc())
+
+    def export_daily_theme_totals(self, directory: str, target_date_str: Optional[str] = None) -> None:
+        """Export daily totals per theme to separate files, appending new data."""
+        try:
+            import re
+            def slugify(text: str) -> str:
+                text = text.lower()
+                text = re.sub(r'[^a-z0-9]+', '_', text)
+                return text.strip('_')
+
+            if not target_date_str:
+                target_date_str = datetime.now().strftime('%Y-%m-%d')
+
+            os.makedirs(directory, exist_ok=True)
+
+            conn = sqlite3.connect(self.db_path)
+            c = conn.cursor()
+
+            # Get totals grouped by theme
+            c.execute('''
+                SELECT
+                    f.theme,
+                    COUNT(a.id) as total_seen,
+                    SUM(CASE WHEN a.post_id != -1 THEN 1 ELSE 0 END) as total_published
+                FROM articles a
+                JOIN feeds f ON a.feed_id = f.id
+                WHERE DATE(a.date_seen) = ? OR DATE(a.published_at) = ?
+                GROUP BY f.theme
+                ORDER BY f.theme
+            ''', (target_date_str, target_date_str))
+
+            rows = c.fetchall()
+            conn.close()
+
+            for theme, seen, pub in rows:
+                filename = f"daily_{slugify(theme)}.txt"
+                output_path = os.path.join(directory, filename)
+                file_exists = os.path.exists(output_path)
+
+                rate = (pub * 100.0 / seen) if seen > 0 else 0.0
+
+                with open(output_path, 'a', encoding='utf-8') as f:
+                    if not file_exists:
+                        f.write(f"{'Date':<10} | {'Seen':<5} | {'Pub':<5} | {'Rate':<6}\n")
+                        f.write("-" * 35 + "\n")
+
+                    f.write(f"{target_date_str:<10} | {seen:<5} | {pub:<5} | {rate:<5.1f}%\n")
+
+            logger.info(f"Daily theme totals exported to {directory}")
+        except Exception as e:
+            logger.error(f"Error exporting daily theme totals: {e}")
 
     def get_current_timestamp(self) -> str:
         return datetime.now().strftime(self.timestamp_format)

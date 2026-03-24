@@ -112,10 +112,12 @@ class NewsFeedApp:
                     if is_selected:
                         # 3. Similarity Check, before calling the LLM to generate summaries
                         recent_articles = self.db.get_recent_published(theme.name, days=2)
-                        similar_title = self.analyzer.check_for_duplicate(article, recent_articles)
+                        duplicate = self.analyzer.check_for_duplicate(article, recent_articles)
 
-                        if similar_title:
-                            logger.info(f"[{theme.name}] [SKIP] Similar article already published: '{similar_title}'")
+                        if duplicate:
+                            similar_title, similar_published_at = duplicate
+                            pub_date_str = self._format_pub_date(similar_published_at)
+                            logger.info(f"[{theme.name}] [SKIP] Similar article already published: '{similar_title}'{pub_date_str}")
                             article.short_summary = f"DUPLICATE of {similar_title}"
                             article.embedding = None # no need to store the embedding for duplicate articles
                         else:
@@ -199,10 +201,12 @@ class NewsFeedApp:
 
             # 2. Duplicate check
             recent_articles = self.db.get_recent_published(theme.name, days=2)
-            similar_title = self.analyzer.check_for_duplicate(p_article, recent_articles)
+            duplicate = self.analyzer.check_for_duplicate(p_article, recent_articles)
 
-            if similar_title:
-                logger.info(f"[{theme.name}] [PENDING] Similar article already published: '{similar_title}'")
+            if duplicate:
+                similar_title, similar_published_at = duplicate
+                pub_date_str = self._format_pub_date(similar_published_at)
+                logger.info(f"[{theme.name}] [PENDING] Similar article already published: '{similar_title}'{pub_date_str}")
                 p_article.short_summary = f"DUPLICATE of {similar_title}"
                 self.db.save_article(p_article)
                 continue
@@ -219,12 +223,54 @@ class NewsFeedApp:
             except Exception as e:
                 logger.error(f"[{theme.name}] [PENDING] Failed to publish '{p_article.title}': {e}")
 
+    def _format_pub_date(self, published_at: str) -> str:
+        if not published_at:
+            return ""
+        try:
+            dt = datetime.strptime(published_at, self.db.timestamp_format)
+            hours_ago = round((datetime.now() - dt).total_seconds() / 3600)
+            return f", published at {published_at} ({hours_ago} hours ago)"
+        except Exception:
+            return f", published at {published_at}"
+
     def _perform_daily_maintenance(self):
         logger.info("[Maintenance] Starting DB maintenance")
         self.db.purge_old_entries(days_delete_unpublished=30, days_delete_published=90)
         self.db.cleanup_embeddings(days=3)
         self.db.optimize()
         logger.info("[Maintenance] DB maintenance completed")
+
+        # Cleanup old log and stats files
+        self._cleanup_old_files("logs", self.config.log_retention_days)
+        self._cleanup_old_files("stats", self.config.stats_retention_days)
+
+    def _cleanup_old_files(self, directory: str, retention_days: int):
+        """Deletes files in the specified directory older than retention_days."""
+        if not os.path.exists(directory):
+            return
+
+        cutoff = time.time() - (retention_days * 86400)
+        logger.info(f"[Maintenance] Cleaning up files in '{directory}' older than {retention_days} days")
+
+        count = 0
+        try:
+            for filename in os.listdir(directory):
+                file_path = os.path.join(directory, filename)
+                if os.path.isfile(file_path):
+                    if os.path.getmtime(file_path) < cutoff:
+                        try:
+                            os.remove(file_path)
+                            count += 1
+                            logger.debug(f"[Maintenance] Deleted old file: {filename}")
+                        except Exception as e:
+                            logger.error(f"[Maintenance] Failed to delete {filename}: {e}")
+        except Exception as e:
+            logger.error(f"[Maintenance] Error listing directory '{directory}': {e}")
+
+        if count > 0:
+            logger.info(f"[Maintenance] Deleted {count} old files in '{directory}'")
+        else:
+            logger.info(f"[Maintenance] No old files found in '{directory}'")
 
     def _restart_application(self):
         logger.info("[Maintenance] Restarting application to force log rotation")
@@ -261,6 +307,7 @@ class NewsFeedApp:
         os.makedirs("stats", exist_ok=True)
         yesterday_str = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
         self.db.export_statistics(f"stats/statistics_{yesterday_str}.txt", target_date_str=yesterday_str)
+        self.db.export_daily_theme_totals("stats", target_date_str=yesterday_str)
 
         self._restart_application()
         # logger.info("[Maintenance] Nightly routine completed")
