@@ -100,7 +100,8 @@ class NewsFeedApp:
                             and (article.importance_score + article.urgency_score) >= theme.min_importance_score + theme.min_urgency_score
                         )
                         if is_selected:
-                            logger.info(f"[{theme.name}] [ANALYSIS] {article.title} is selected due to fuzzy score matching (R:{article.relevance_score}, I:{article.importance_score}, U:{article.urgency_score})")
+                            logger.info(f"[{theme.name}] [ANALYSIS] {article.title} is selected due to fuzzy matching (R:{article.relevance_score}, I:{article.importance_score}, U:{article.urgency_score})")
+                            article.reasoning += " (Fuzzy matching)"
 
                     status = "SELECTED" if is_selected else "SKIPPED"
 
@@ -111,7 +112,7 @@ class NewsFeedApp:
 
                     if is_selected:
                         # 3. Similarity Check, before calling the LLM to generate summaries
-                        recent_articles = self.db.get_recent_published(theme.name, days=2)
+                        recent_articles = self.db.get_recent_published(theme.name, days=self.config.duplicate_check_days)
                         duplicate = self.analyzer.check_for_duplicate(article, recent_articles)
 
                         if duplicate:
@@ -200,7 +201,7 @@ class NewsFeedApp:
                 logger.error(f"[{theme.name}] [PENDING] Error checking age for pending article '{p_article.title}': {e}")
 
             # 2. Duplicate check
-            recent_articles = self.db.get_recent_published(theme.name, days=2)
+            recent_articles = self.db.get_recent_published(theme.name, days=self.config.duplicate_check_days)
             duplicate = self.analyzer.check_for_duplicate(p_article, recent_articles)
 
             if duplicate:
@@ -236,7 +237,7 @@ class NewsFeedApp:
     def _perform_daily_maintenance(self):
         logger.info("[Maintenance] Starting DB maintenance")
         self.db.purge_old_entries(days_delete_unpublished=30, days_delete_published=90)
-        self.db.cleanup_embeddings(days=3)
+        self.db.cleanup_embeddings(days=self.config.duplicate_check_days + 1)
         self.db.optimize()
         logger.info("[Maintenance] DB maintenance completed")
 

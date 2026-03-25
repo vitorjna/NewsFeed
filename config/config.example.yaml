@@ -26,6 +26,7 @@ fetch_interval_minutes: 15
 max_article_age_hours: 8
 log_retention_days: 10
 stats_retention_days: 30
+duplicate_check_days: 2
 database_path: "data/news_feed.db"
 debug: true
 dev_mode: false

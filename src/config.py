@@ -51,6 +51,7 @@ class AppConfig:
     themes: List[FeedConfig]
     log_retention_days: int = 10
     stats_retention_days: int = 30
+    duplicate_check_days: int = 2
     debug: bool = False
     dev_mode: bool = False
 
@@ -103,6 +104,7 @@ def load_config(config_path: str = "config/config.yaml") -> AppConfig:
             themes=themes,
             log_retention_days=raw_config.get('log_retention_days', 10),
             stats_retention_days=raw_config.get('stats_retention_days', 30),
+            duplicate_check_days=raw_config.get('duplicate_check_days', 2),
             debug=raw_config.get('debug', False),
             dev_mode=raw_config.get('dev_mode', False)
         )
