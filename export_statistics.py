@@ -5,12 +5,17 @@ Opens the database in read-only mode so it does not block
 the main application from writing.
 
 Usage:
-    python export_statistics.py <YYYY-MM-DD> [--output <path>] [--db <path>]
+    python export_statistics.py <YYYY-MM-DD> [--output <path>] [--db <path>] [--themes [dir]]
 
 Examples:
     python export_statistics.py 2026-03-04
     python export_statistics.py 2026-03-04 --output reports/march.txt
     python export_statistics.py 2026-03-04 --db data/news_feed.db
+    python export_statistics.py 2026-03-04 --themes
+    python export_statistics.py 2026-03-04 --themes exports/themes_stats
+
+Note: Using --themes will export daily totals for each theme into separate files 
+within the specified directory (defaults to 'stats').
 """
 
 import sys
@@ -217,7 +222,7 @@ def export_statistics(db_path: str, target_date_str: str, output_path: str, them
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Export NewsFeed statistics for a given day (read-only DB access)."
+        description="Export NewsFeed statistics (feed-level or theme-level) for a given day."
     )
     parser.add_argument(
         "date",
@@ -238,7 +243,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         nargs='?',
         const='stats',
         default=None,
-        help="Also export daily theme totals to the specified directory (defaults to 'stats' if flag is present).",
+        help="Export daily theme totals to the specified directory (defaults to 'stats').",
     )
     return parser.parse_args(argv)
 

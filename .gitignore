@@ -39,5 +39,5 @@ config/config.yaml
 .idea/
 .vscode/
 
-# Docker
-.docker/
+# Visualization
+charts.html

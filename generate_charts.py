@@ -1,0 +1,243 @@
+"""
+Daily Theme Stats Chart Generator
+=================================
+
+This script generates an interactive HTML dashboard (charts.html) from the
+daily statistics files produced by the NewsFeed application.
+
+Data Source:
+The script looks for 'daily_[theme].txt' files, which are typically created
+in the 'stats/' directory of this project.
+
+How to use:
+1. From the project root, simply run:
+   python generate_charts.py
+2. The script will automatically scan the 'stats/' folder and generate a 'charts.html' file.
+3. Open 'charts.html' in your browser to view the interactive charts.
+
+Note: No external dependencies are required. Uses standard libraries and Chart.js via CDN.
+"""
+
+import os
+import glob
+import json
+
+def parse_file(filepath):
+    data = {'dates': [], 'seen': [], 'pub': [], 'rate': []}
+    with open(filepath, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+        # Skip the header (first 2 lines)
+        for line in lines[2:]:
+            if not line.strip():
+                continue
+            parts = [p.strip() for p in line.split('|')]
+            if len(parts) >= 4:
+                date = parts[0]
+                seen = int(parts[1])
+                pub = int(parts[2])
+                rate = float(parts[3].replace('%', '').strip())
+                data['dates'].append(date)
+                data['seen'].append(seen)
+                data['pub'].append(pub)
+                data['rate'].append(rate)
+    return data
+
+def main():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # Priority 1: Check in 'stats' subdirectory (standard project structure)
+    stats_dir = os.path.join(script_dir, 'stats')
+    files = glob.glob(os.path.join(stats_dir, 'daily_*.txt'))
+
+    # Priority 2: Check in current directory (if run from inside stats/ or if files moved)
+    if not files:
+        files = glob.glob(os.path.join(script_dir, 'daily_*.txt'))
+        if files:
+            stats_dir = script_dir
+
+    if not files:
+        print(f"Error: No daily theme files (daily_*.txt) found in {os.path.join(script_dir, 'stats')} or {script_dir}.")
+        return
+
+    themes_data = {}
+    for filepath in files:
+        filename = os.path.basename(filepath)
+        theme = filename.replace('daily_', '').replace('.txt', '')
+        themes_data[theme] = parse_file(filepath)
+
+    html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Daily Theme Stats Charts</title>
+    <!-- Using Chart.js via CDN, requiring no local package installation -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {{
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }}
+        .header {{
+            text-align: center;
+            margin-bottom: 30px;
+        }}
+        .charts-container {{
+            display: flex;
+            flex-direction: column;
+            gap: 30px;
+            align-items: center;
+        }}
+        .chart-card {{
+            width: 90%;
+            max-width: 1000px;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }}
+        .chart-title {{
+            text-align: center;
+            text-transform: capitalize;
+            color: #333;
+            margin-top: 0;
+        }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Daily Theme Statistics</h1>
+        <p>Evolution of articles seen, published, and publish rate.</p>
+    </div>
+
+    <div class="charts-container" id="charts"></div>
+
+    <script>
+        const themesData = {json.dumps(themes_data)};
+        const chartsDiv = document.getElementById('charts');
+
+        for (const [theme, data] of Object.entries(themesData)) {{
+            const themeCard = document.createElement('div');
+            themeCard.className = 'chart-card';
+
+            const title = document.createElement('h2');
+            title.className = 'chart-title';
+            title.textContent = theme.replace(/_/g, ' ');
+            themeCard.appendChild(title);
+
+            const canvasContainer = document.createElement('div');
+            canvasContainer.style.position = 'relative';
+            canvasContainer.style.height = '400px';
+            canvasContainer.style.width = '100%';
+
+            const canvas = document.createElement('canvas');
+            canvasContainer.appendChild(canvas);
+            themeCard.appendChild(canvasContainer);
+            chartsDiv.appendChild(themeCard);
+
+            new Chart(canvas, {{
+                type: 'line',
+                data: {{
+                    labels: data.dates,
+                    datasets: [
+                        {{
+                            label: 'Articles Seen',
+                            data: data.seen,
+                            borderColor: 'rgb(54, 162, 235)',
+                            backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                            yAxisID: 'y',
+                            tension: 0.3,
+                            fill: false
+                        }},
+                        {{
+                            label: 'Articles Published',
+                            data: data.pub,
+                            borderColor: 'rgb(75, 192, 192)',
+                            backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                            yAxisID: 'y',
+                            tension: 0.3,
+                            fill: false
+                        }},
+                        {{
+                            label: 'Publish Rate (%)',
+                            data: data.rate,
+                            borderColor: 'rgb(255, 99, 132)',
+                            backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                            yAxisID: 'y1',
+                            tension: 0.3,
+                            fill: false
+                        }}
+                    ]
+                }},
+                options: {{
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {{
+                        mode: 'index',
+                        intersect: false,
+                    }},
+                    plugins: {{
+                        tooltip: {{
+                            callbacks: {{
+                                label: function(context) {{
+                                    let label = context.dataset.label || '';
+                                    if (label) {{
+                                        label += ': ';
+                                    }}
+                                    if (context.parsed.y !== null) {{
+                                        label += context.parsed.y;
+                                        if (context.dataset.yAxisID === 'y1') {{
+                                            label += '%';
+                                        }}
+                                    }}
+                                    return label;
+                                }}
+                            }}
+                        }}
+                    }},
+                    scales: {{
+                        x: {{
+                            display: true,
+                            title: {{
+                                display: true,
+                                text: 'Date'
+                            }}
+                        }},
+                        y: {{
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: {{
+                                display: true,
+                                text: 'Articles Count'
+                            }}
+                        }},
+                        y1: {{
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: {{
+                                display: true,
+                                text: 'Publish Rate (%)'
+                            }},
+                            grid: {{
+                                drawOnChartArea: false
+                            }}
+                        }}
+                    }}
+                }}
+            }});
+        }}
+    </script>
+</body>
+</html>
+"""
+    output_path = os.path.join(script_dir, 'charts.html')
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(html_content)
+    print(f"Charts successfully generated. Open {{output_path}} in your browser to view.")
+
+if __name__ == "__main__":
+    main()
