@@ -1,11 +1,25 @@
 import feedparser
 import time
 import calendar
+from datetime import datetime
 from typing import List, Optional
 from .utils import setup_logger, clean_html
 from .database import DatabaseManager
 import trafilatura
 import requests
+from dataclasses import dataclass
+
+@dataclass
+class FeedPost:
+    title: str
+    link: str
+    rss_summary: str
+    rss_date: str
+    source_feed: str
+    source_name: str
+    theme: str
+    image_url: Optional[str]
+    feed_id: int
 
 logger = setup_logger("FeedFetcher")
 
@@ -31,7 +45,7 @@ class FeedFetcher:
 
     def fetch_full_content(self, url: str) -> Optional[str]:
         """
-        Extract the full article content from the corresponding webpage.
+        Extract the full post content from the corresponding webpage.
         Uses trafilatura for robust extraction. If trafilatura fails, it will try requests and cloudscraper.
         """
         try:
@@ -115,13 +129,11 @@ class FeedFetcher:
 
         return list(seen.values())
 
-    def fetch_feeds(self, feeds: List[str], theme_name: str, max_age_hours: int = 24) -> List['Article']:
+    def fetch_feeds(self, feeds: List[str], theme_name: str) -> List[FeedPost]:
         """
-        Fetch articles from a list of feeds.
-        Returns a list of NEW articles.
+        Fetch posts from a list of feeds.
+        Returns a list of NEW FeedPosts.
         """
-        from .article import Article
-
         logger.info(f"[Feed Fetcher] Fetching feeds for theme '{theme_name}'")
 
         all_entries = []
@@ -157,10 +169,10 @@ class FeedFetcher:
                 logger.error(f"[Feed Fetcher] Error fetching feed {feed_url}: {e}")
 
         # Deduplicate entries from this cycle, keeping the most recent
-        # Some feeds can have duplicate entries, for example if an article is updated and the feed is updated with the same link
+        # Some feeds can have duplicate entries, for example if a post is updated and the feed is updated with the same link
         unique_entries = self._filter_most_recent_entries(all_entries)
 
-        new_articles = []
+        new_posts = []
         for item in unique_entries:
             entry = item['entry']
             feed_id = item['feed_id']
@@ -171,40 +183,16 @@ class FeedFetcher:
             title = clean_html(entry.get('title', 'No Title'))
             # Prefer summary, fall back to description or empty
             rss_summary = clean_html(entry.get('summary', entry.get('description', '')))
-            published = entry.get('published', str(time.time()))
-
-            # Age check (ignore everything older than X hours)
-            published_parsed = entry.get('published_parsed')
-            if published_parsed:
-                # entry.published_parsed is a struct_time in UTC
-                pub_time = calendar.timegm(published_parsed)
-                age_seconds = time.time() - pub_time
-                if age_seconds > (max_age_hours * 3600):
-                    logger.debug(f"[Feed Fetcher] Skipping old article ({int(age_seconds/3600)}h old): {title}")
-
-                    article = Article(
-                        title=title,
-                        link=link,
-                        rss_summary=rss_summary,
-                        rss_date=published,
-                        source_feed=feed_url,
-                        source_name=feed_name,
-                        theme=theme_name,
-                        image_url=self._extract_image(entry),
-                        relevance_score=0,
-                        importance_score=0,
-                        urgency_score=0,
-                        reasoning="Article is too old",
-                        feed_id=feed_id
-                    )
-                    self.db.save_article(article)
-                    continue
+            if not entry.get('published_parsed'):
+                logger.warning(f"[Feed Fetcher] No publication date for: {link}")
+                published = datetime.now().strftime(self.db.timestamp_format)
             else:
-                logger.warning(f"[Feed Fetcher] No publication date for: {link}. Proceeding with article.")
+                published_dt = datetime.fromtimestamp(time.mktime(entry.get('published_parsed')))
+                published = published_dt.strftime(self.db.timestamp_format)
 
             image_url = self._extract_image(entry)
 
-            article = Article(
+            post = FeedPost(
                 title=title,
                 link=link,
                 rss_summary=rss_summary,
@@ -215,7 +203,7 @@ class FeedFetcher:
                 image_url=image_url,
                 feed_id=feed_id
             )
-            new_articles.append(article)
+            new_posts.append(post)
 
-        logger.info(f"[Feed Fetcher] Found {len(new_articles)} new articles for theme '{theme_name}'")
-        return new_articles
+        logger.info(f"[Feed Fetcher] Found {len(new_posts)} new posts for theme '{theme_name}'")
+        return new_posts

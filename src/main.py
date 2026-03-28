@@ -55,97 +55,46 @@ class NewsFeedApp:
         bot = self.bot_manager.create_bot()
 
         try:
-            logger.info("[Update Cycle] Starting cycle")
+            logger.info("[Update Cycle] Starting")
             cycle_start_time = time.time()
 
             for theme in self.config.themes:
                 logger.info(f"[{theme.name}] Processing theme start")
 
-                await self._handle_pending_articles(bot, theme)
+                articles_to_process = self._get_pending_articles(theme)
 
-                # 1. Fetch
-                new_articles: list[Article] = self.fetcher.fetch_feeds(
+                new_posts = self.fetcher.fetch_feeds(
                     theme.feeds,
-                    theme.name,
-                    max_age_hours=self.config.max_article_age_hours
+                    theme.name
                 )
 
-                if not new_articles:
-                    logger.info(f"[{theme.name}] No new articles found.")
+                for post in new_posts:
+                    article = Article(
+                        title=post.title,
+                        link=post.link,
+                        rss_summary=post.rss_summary,
+                        rss_date=post.rss_date,
+                        source_feed=post.source_feed,
+                        source_name=post.source_name,
+                        theme=post.theme,
+                        image_url=post.image_url,
+                        feed_id=post.feed_id
+                    )
+                    self.db.save_article(article)
+                    articles_to_process.append(article)
+
+                if not articles_to_process:
+                    logger.info(f"[{theme.name}] No articles to process.")
                     continue
 
-                for article in new_articles:
+                for article in articles_to_process:
                     # Add a small delay to respect rate limits (especially for Gemini free tier)
                     if self.config.llm.primary_base_url and "google" in self.config.llm.primary_base_url.lower():
                         await asyncio.sleep(2) # 30 RPM limit = 2s per request.
 
                     logger.info(f"[{theme.name}] Processing article: {article.title[:50]}... | Source: {article.source_name[:30]}...")
 
-                    # 2. Analyze Scores
-                    await asyncio.to_thread(article.analyze_scores, self.analyzer, self.fetcher, theme.prompt_focus)
-
-                    is_selected = (
-                        article.relevance_score >= theme.min_relevance_score and
-                        article.importance_score >= theme.min_importance_score and
-                        article.urgency_score >= theme.min_urgency_score
-                    )
-
-                    if not is_selected:
-                        # also select if importance and urgency are 1 point below the threshold but their sum is above the threshold
-                        # allows for stricter definition of the threshold, but still let's articles be selected if one score is 1 point below but the other score is at least 1 point above
-                        is_selected = (
-                            article.relevance_score >= theme.min_relevance_score and
-                            (article.importance_score >= theme.min_importance_score - 1 and
-                            article.urgency_score >= theme.min_urgency_score - 1)
-                            and (article.importance_score + article.urgency_score) >= theme.min_importance_score + theme.min_urgency_score
-                        )
-                        if is_selected:
-                            logger.info(f"[{theme.name}] [ANALYSIS] {article.title} is selected due to fuzzy matching (R:{article.relevance_score}, I:{article.importance_score}, U:{article.urgency_score})")
-                            article.reasoning += " (Fuzzy matching)"
-
-                    status = "SELECTED" if is_selected else "SKIPPED"
-
-                    logger.info(
-                        f"[{theme.name}] [ANALYSIS] {status}: Scores: R:{article.relevance_score}, I:{article.importance_score}, U:{article.urgency_score} | "
-                        f"{article.title} | Reasoning: {article.reasoning}"
-                    )
-
-                    if is_selected:
-                        # 3. Similarity Check, before calling the LLM to generate summaries
-                        recent_articles = self.db.get_recent_published(theme.name, days=self.config.duplicate_check_days)
-                        duplicate = self.analyzer.check_for_duplicate(article, recent_articles)
-
-                        if duplicate:
-                            similar_title, similar_published_at = duplicate
-                            pub_date_str = self._format_pub_date(similar_published_at)
-                            logger.info(f"[{theme.name}] [SKIP] Similar article already published: '{similar_title}'{pub_date_str}")
-                            article.short_summary = f"DUPLICATE of {similar_title}"
-                            article.embedding = None # no need to store the embedding for duplicate articles
-                        else:
-                            # 4. Analyze Summaries
-                            await asyncio.to_thread(article.generate_summaries, self.analyzer, self.fetcher, theme.language)
-
-                            if not article.is_valid_news:
-                                logger.info(f"[{theme.name}] [REJECTED] Article rejected: {article.reasoning}")
-                                article.embedding = None # no need to store the embedding for rejected articles
-
-                            else:
-                                # 4.5 Generate Hashtags
-                                await asyncio.to_thread(article.generate_hashtags, self.analyzer, self.fetcher, theme.language, theme.default_hashtags)
-
-                                # 5. Publish
-                                logger.info(f"[{theme.name}] [PUBLISH] {article.title}")
-                                try:
-                                    if not article.short_summary:
-                                        logger.warning(f"[{theme.name}] Summary generation failed for '{article.title}'. Defaulting to RSS summary.")
-                                        article.short_summary = article.rss_summary
-
-                                    await self.publisher.publish(bot, article, theme.channel_id, include_image=theme.include_image, dev_mode=self.config.dev_mode)
-                                    article.mark_published(self.db.get_current_timestamp())
-                                except Exception as e:
-                                    logger.error(f"[{theme.name}] Failed to publish '{article.title}': {e}")
-
-                    self.db.save_article(article)
+                    await article.process(self.db, self.analyzer, self.fetcher, self.publisher, bot, theme, self.config)
 
                 logger.info(f"[{theme.name}] Processing theme end")
 
@@ -153,16 +102,16 @@ class NewsFeedApp:
             self._is_running_cycle = False
             logger.info(f"[Update Cycle] Completed in {(time.time() - cycle_start_time) / 60:.1f} minutes")
 
-    async def _handle_pending_articles(self, bot, theme):
+    def _get_pending_articles(self, theme) -> list[Article]:
         """
-        Checks for articles that were selected for publication but failed to publish,
-        and attempts to re-publish them if they pass age and duplicate checks.
+        Returns a list of Article objects that haven't finish processing.
         """
         pending_data = self.db.get_pending_articles(theme.name)
+        pending_articles = []
         if not pending_data:
-            return
+            return pending_articles
 
-        logger.info(f"[{theme.name}] Found {len(pending_data)} pending articles from previous attempts.")
+        logger.info(f"[{theme.name}] Found {len(pending_data)} pending articles")
         for p_data in pending_data:
             p_article = Article(
                 title=p_data['title'],
@@ -183,60 +132,17 @@ class NewsFeedApp:
                 embedding=p_data['embedding'],
                 post_id=p_data['post_id'],
                 discussion_post_id=p_data['discussion_post_id'],
-                feed_id=p_data['feed_id']
+                feed_id=p_data['feed_id'],
+                stage=p_data['stage'],
+                date_seen=p_data['date_seen']
             )
+            pending_articles.append(p_article)
 
-            # 1. Age check
-            try:
-                date_seen = datetime.strptime(p_data['date_seen'], self.db.timestamp_format)
-                age_hours = (datetime.now() - date_seen).total_seconds() / 3600
-
-                if age_hours > self.config.max_article_age_hours:
-                    logger.info(f"[{theme.name}] [PENDING] Skipping old article: '{p_article.title}' ({int(age_hours)}h old)")
-                    p_article.short_summary = f"SKIPPED: Too old when trying to publish"
-                    p_article.long_summary = None # remove long summary so the article is not processed again
-                    self.db.save_article(p_article)
-                    continue
-            except Exception as e:
-                logger.error(f"[{theme.name}] [PENDING] Error checking age for pending article '{p_article.title}': {e}")
-
-            # 2. Duplicate check
-            recent_articles = self.db.get_recent_published(theme.name, days=self.config.duplicate_check_days)
-            duplicate = self.analyzer.check_for_duplicate(p_article, recent_articles)
-
-            if duplicate:
-                similar_title, similar_published_at = duplicate
-                pub_date_str = self._format_pub_date(similar_published_at)
-                logger.info(f"[{theme.name}] [PENDING] Similar article already published: '{similar_title}'{pub_date_str}")
-                p_article.short_summary = f"DUPLICATE of {similar_title}"
-                self.db.save_article(p_article)
-                continue
-
-            # 3. Publish
-            logger.info(f"[{theme.name}] [PENDING-PUBLISH] {p_article.title}")
-            try:
-                # on the main loop, we check if the small summary exists and set it to the rss summary if it doesn't
-                # that's already been done on the first publication attempt
-
-                await self.publisher.publish(bot, p_article, theme.channel_id, include_image=theme.include_image, dev_mode=self.config.dev_mode)
-                p_article.mark_published(self.db.get_current_timestamp())
-                self.db.save_article(p_article)
-            except Exception as e:
-                logger.error(f"[{theme.name}] [PENDING] Failed to publish '{p_article.title}': {e}")
-
-    def _format_pub_date(self, published_at: str) -> str:
-        if not published_at:
-            return ""
-        try:
-            dt = datetime.strptime(published_at, self.db.timestamp_format)
-            hours_ago = round((datetime.now() - dt).total_seconds() / 3600)
-            return f", published at {published_at} ({hours_ago} hours ago)"
-        except Exception:
-            return f", published at {published_at}"
+        return pending_articles
 
     def _perform_daily_maintenance(self):
         logger.info("[Maintenance] Starting DB maintenance")
-        self.db.purge_old_entries(days_delete_unpublished=30, days_delete_published=90)
+        self.db.purge_old_entries(days_delete_unpublished=180, days_delete_published=365)
         self.db.cleanup_embeddings(days=self.config.duplicate_check_days + 1)
         self.db.optimize()
         logger.info("[Maintenance] DB maintenance completed")
@@ -354,7 +260,7 @@ class NewsFeedApp:
         schedule.every().day.at("03:00").do(self._nightly_routine)
 
         # Heartbeat schedule
-        schedule.every(1).minutes.do(self._write_heartbeat)
+        # schedule.every(1).minutes.do(self._write_heartbeat)
 
         # Cross-promotion schedule
         #schedule.every().day.at("09:00").do(

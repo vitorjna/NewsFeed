@@ -61,6 +61,8 @@ class DatabaseManager:
                 post_id INTEGER DEFAULT -1,
                 discussion_post_id INTEGER DEFAULT -1,
 
+                stage TEXT DEFAULT 'NEW',
+
                 FOREIGN KEY(feed_id) REFERENCES feeds(id) ON DELETE CASCADE
             )
         ''')
@@ -72,6 +74,7 @@ class DatabaseManager:
         c.execute('CREATE INDEX IF NOT EXISTS idx_articles_post_id ON articles(post_id)')
         c.execute('CREATE INDEX IF NOT EXISTS idx_articles_date_seen ON articles(date_seen)')
         c.execute('CREATE INDEX IF NOT EXISTS idx_articles_published_at ON articles(published_at)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_articles_stage ON articles(stage)')
 
         conn.commit()
         conn.close()
@@ -146,7 +149,8 @@ class DatabaseManager:
                         embedding = ?,
                         published_at = ?,
                         post_id = ?,
-                        discussion_post_id = ?
+                        discussion_post_id = ?,
+                        stage = ?
                     WHERE id = ?
                 ''', (article.relevance_score,
                       article.importance_score,
@@ -160,6 +164,7 @@ class DatabaseManager:
                       article.published_at,
                       article.post_id,
                       article.discussion_post_id,
+                      article.stage,
                       row[0]))
             else:
                 # Insert new
@@ -168,11 +173,11 @@ class DatabaseManager:
                         feed_id, url, title, rss_summary, rss_date,
                         relevance_score, importance_score, urgency_score, reasoning,
                         full_content, short_summary, long_summary, hashtags, embedding,
-                        published_at, post_id, discussion_post_id
+                        published_at, post_id, discussion_post_id, stage
                     ) VALUES (?, ?, ?, ?, ?,
                               ?, ?, ?, ?,
                               ?, ?, ?, ?, ?,
-                              ?, ?, ?)
+                              ?, ?, ?, ?)
                 ''', (
                     article.feed_id,
                     article.link,
@@ -191,6 +196,7 @@ class DatabaseManager:
                     article.published_at,
                     article.post_id,
                     article.discussion_post_id,
+                    article.stage,
                 ))
 
             conn.commit()
@@ -251,8 +257,7 @@ class DatabaseManager:
             conn = sqlite3.connect(self.db_path)
             c = conn.cursor()
 
-            # Set embedding to NULL for articles published before the cutoff,
-            # or not published (we generate embeds before summaries, and some articles are rejected during summary generation)
+            # Set embedding to NULL for articles published before the cutoff
             c.execute('''
                 UPDATE articles
                 SET embedding = NULL
@@ -456,8 +461,8 @@ class DatabaseManager:
 
     def get_pending_articles(self, theme: str) -> List[dict]:
         """
-        Get articles that were selected for publication but failed to publish.
-        This is used to retry publishing articles that failed due to network issues or other temporary problems.
+        Get articles that haven't finished processing.
+        This is used to retry processing articles that failed due to network issues or other problems.
         """
         try:
             conn = sqlite3.connect(self.db_path)
@@ -468,12 +473,12 @@ class DatabaseManager:
                     f.url as source_feed, f.name as source_name, f.theme,
                     a.short_summary, a.long_summary, a.hashtags, a.full_content,
                     a.relevance_score, a.importance_score, a.urgency_score, a.reasoning,
-                    a.embedding, a.post_id, a.discussion_post_id, a.feed_id, a.date_seen
+                    a.embedding, a.post_id, a.discussion_post_id, a.feed_id, a.date_seen, a.stage
                 FROM articles a
                 JOIN feeds f ON a.feed_id = f.id
                 WHERE f.theme = ?
                   AND a.post_id = -1
-                  AND a.long_summary IS NOT NULL
+                  AND a.stage IN ('NEW', 'SCORE', 'DEDUP', 'SUMMARY', 'HASHTAGS', 'PUBLISH')
             ''', (theme,))
 
             columns = [column[0] for column in c.description]

@@ -161,7 +161,7 @@ class NewsAnalyzer:
         """
         Analyzes an article for relevance, importance, and urgency.
         """
-        logger.debug(f"[Score Analyzer] Analyzing scores for article: {article_title}")
+        logger.info(f"[Score Analyzer] Analyzing scores for article: {article_title}")
 
         if not article_title and not article_content:
             logger.warning(f"[Score Analyzer] No content provided for article: {article_title}")
@@ -289,6 +289,7 @@ class NewsAnalyzer:
     - Ensure all key entities are preserved accurately as they appear in the text.
     - Do not hallucinate facts, formal titles, names, events, or anything not present in the source text.
     - NEVER use meta-phrases like "the article mentions", "the publisher reports", "the newspaper asks", or refer to the text, author, or reporting itself. Report the facts directly as an independent observer.
+    - NEVER mention emailing or contacting anyone, or the name of the publisher.
 
     Formatting:
     - DO NOT USE MARKDOWN (no **, __, [], etc.).
@@ -443,8 +444,6 @@ class NewsAnalyzer:
 
             except Exception as exc:
                 logger.error(f"[Hashtag Generator] Error generating hashtags for '{article_title}' (attempt {attempt}): {exc}")
-                # logger.debug(f"[Hashtag Generator] Error generating hashtags. Sent content: {llm_message}")
-                # logger.debug(f"[Hashtag Generator] Error generating hashtags. Received content: {response_content}")
 
                 if attempt < max_retries:
                     delay = extract_retry_delay(exc)

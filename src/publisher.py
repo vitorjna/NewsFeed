@@ -64,8 +64,7 @@ class TelegramPublisher:
             article.post_id = message.message_id
 
             # Determine where to post the long summary (as a comment) only if it exists
-
-            if article.long_summary:
+            if article.long_summary and len(article.long_summary) > 50:
                 discussion_chat_id = None
                 forwarded_message_id = None
 
