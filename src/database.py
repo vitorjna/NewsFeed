@@ -213,7 +213,7 @@ class DatabaseManager:
                 SELECT a.title, a.rss_summary, a.embedding, a.published_at
                 FROM articles a
                 JOIN feeds f ON a.feed_id = f.id
-                WHERE f.theme = ? AND a.post_id != -1 AND a.published_at > datetime('now', ?)
+                WHERE f.theme = ? AND a.stage = 'PUBLISHED' AND a.published_at > datetime('now', ?)
             ''', (theme, f'-{days} days'))
             results = c.fetchall()
             conn.close()
@@ -305,8 +305,8 @@ class DatabaseManager:
                         f.theme,
                         f.name as feed_name,
                         COUNT(a.id) as total_seen,
-                        SUM(CASE WHEN a.post_id != -1 THEN 1 ELSE 0 END) as total_published,
-                        SUM(CASE WHEN a.post_id != -1 THEN 1 ELSE 0 END) * 100.0 / COUNT(a.id) as publish_rate,
+                        SUM(CASE WHEN a.stage = 'PUBLISHED' THEN 1 ELSE 0 END) as total_published,
+                        SUM(CASE WHEN a.stage = 'PUBLISHED' THEN 1 ELSE 0 END) * 100.0 / COUNT(a.id) as publish_rate,
                         AVG(a.relevance_score) as avg_relevance,
                         AVG(a.importance_score) as avg_importance,
                         AVG(a.urgency_score) as avg_urgency,
@@ -325,8 +325,8 @@ class DatabaseManager:
                         f.theme,
                         f.name as feed_name,
                         COUNT(a.id) as total_seen,
-                        SUM(CASE WHEN a.post_id != -1 THEN 1 ELSE 0 END) as total_published,
-                        SUM(CASE WHEN a.post_id != -1 THEN 1 ELSE 0 END) * 100.0 / COUNT(a.id) as publish_rate,
+                        SUM(CASE WHEN a.stage = 'PUBLISHED' THEN 1 ELSE 0 END) as total_published,
+                        SUM(CASE WHEN a.stage = 'PUBLISHED' THEN 1 ELSE 0 END) * 100.0 / COUNT(a.id) as publish_rate,
                         AVG(a.relevance_score) as avg_relevance,
                         AVG(a.importance_score) as avg_importance,
                         AVG(a.urgency_score) as avg_urgency,
@@ -427,7 +427,7 @@ class DatabaseManager:
                 SELECT
                     f.theme,
                     COUNT(a.id) as total_seen,
-                    SUM(CASE WHEN a.post_id != -1 THEN 1 ELSE 0 END) as total_published
+                    SUM(CASE WHEN a.stage = 'PUBLISHED' THEN 1 ELSE 0 END) as total_published
                 FROM articles a
                 JOIN feeds f ON a.feed_id = f.id
                 WHERE DATE(a.date_seen) = ? OR DATE(a.published_at) = ?

@@ -51,14 +51,15 @@ class Article:
     stage: str = STAGE_NEW
     date_seen: Optional[str] = None
 
-    async def process(self, db, analyzer: NewsAnalyzer, fetcher: FeedFetcher, publisher, bot, theme_obj, config) -> None:
+    async def process(self, db, analyzer: NewsAnalyzer, fetcher: FeedFetcher, publisher, bot, theme_obj, config) -> bool:
         """
         Processes the article through the state machine until it reaches a terminal state.
         Saves state to the database after each transition.
+        Returns if the article was processed or not
         """
         if self.is_old(config.max_article_age_hours, db.timestamp_format, theme_obj.name):
             db.save_article(self)
-            return
+            return False
 
         while self.stage not in TERMINAL_STAGES:
             logger.debug(f"[{self.stage}] [{theme_obj.name}] Processing '{self.title[:50]}...'")
@@ -148,7 +149,9 @@ class Article:
                 logger.error(traceback.format_exc())
                 self.stage = STAGE_ERROR
                 db.save_article(self)
-                break
+                return False
+
+        return True
 
     def check_content_length(self, phase: str) -> tuple[bool, Optional[str]]:
         """

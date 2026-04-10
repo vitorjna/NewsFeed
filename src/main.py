@@ -56,6 +56,7 @@ class NewsFeedApp:
 
         try:
             logger.info("[Update Cycle] Starting")
+            cycle_article_count = 0
             cycle_start_time = time.time()
 
             for theme in self.config.themes:
@@ -87,20 +88,24 @@ class NewsFeedApp:
                     logger.info(f"[{theme.name}] No articles to process.")
                     continue
 
+                bWasProcessed = False
+                cycle_article_count += len(articles_to_process)
+
                 for article in articles_to_process:
                     # Add a small delay to respect rate limits (especially for Gemini free tier)
-                    if self.config.llm.primary_base_url and "google" in self.config.llm.primary_base_url.lower():
-                        await asyncio.sleep(2) # 30 RPM limit = 2s per request.
+                    if bWasProcessed:
+                        if self.config.llm.primary_base_url and "google" in self.config.llm.primary_base_url.lower():
+                            await asyncio.sleep(2) # 30 RPM limit = 2s per request.
 
                     logger.info(f"[{theme.name}] Processing article: {article.title[:50]}... | Source: {article.source_name[:30]}...")
 
-                    await article.process(self.db, self.analyzer, self.fetcher, self.publisher, bot, theme, self.config)
+                    bWasProcessed = await article.process(self.db, self.analyzer, self.fetcher, self.publisher, bot, theme, self.config)
 
                 logger.info(f"[{theme.name}] Processing theme end")
 
         finally:
             self._is_running_cycle = False
-            logger.info(f"[Update Cycle] Completed in {(time.time() - cycle_start_time) / 60:.1f} minutes")
+            logger.info(f"[Update Cycle] Completed in {(time.time() - cycle_start_time) / 60:.1f} minutes | Articles processed: {cycle_article_count}")
 
     def _get_pending_articles(self, theme) -> list[Article]:
         """

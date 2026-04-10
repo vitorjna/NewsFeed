@@ -86,13 +86,30 @@ class TelegramPublisher:
                                 updates = await bot.get_updates(limit=20, offset=-20)
                                 for update in reversed(updates):
                                     msg = update.message or update.channel_post
+
                                     # In discussion groups, it's often update.message
-                                    if (msg and msg.chat.id == discussion_chat_id and
-                                        msg.forward_from_chat and msg.forward_from_chat.id == chat_info.id and
-                                        msg.forward_from_message_id == message.message_id):
-                                        forwarded_message_id = msg.message_id
-                                        logger.debug(f"[Telegram Publisher] Found forwarded message {forwarded_message_id} in discussion group on attempt {attempt}")
-                                        break
+                                    if msg and msg.chat.id == discussion_chat_id:
+                                        found = False
+
+                                        # Use 'forward_origin' (Telegram Bot API 7.0+)
+                                        if getattr(msg, 'forward_origin', None):
+                                            origin = msg.forward_origin
+
+                                            # Check if the origin is a channel, matches the linked channel ID, and matches the message ID
+                                            if (getattr(origin, 'type', '') == 'channel' and
+                                                getattr(origin, 'chat', None) and origin.chat.id == chat_info.id and
+                                                getattr(origin, 'message_id', None) == message.message_id):
+                                                found = True
+
+                                        # Fallback in case of rollback to an older library version
+                                        elif (getattr(msg, 'forward_from_chat', None) and msg.forward_from_chat.id == chat_info.id and
+                                              getattr(msg, 'forward_from_message_id', None) == message.message_id):
+                                            found = True
+
+                                        if found:
+                                            forwarded_message_id = msg.message_id
+                                            logger.debug(f"[Telegram Publisher] Found forwarded message {forwarded_message_id} in discussion group on attempt {attempt}")
+                                            break
 
                             except Exception as update_err:
                                 logger.warning(f"[Telegram Publisher] Error fetching updates (attempt {attempt}/{max_attempts}): {update_err}")
