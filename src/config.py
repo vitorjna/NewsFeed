@@ -29,6 +29,14 @@ class LLMConfig:
     secondary_base_url: str
     secondary_model: str
     secondary_timeout: int
+    primary_backup_api_key: Optional[str] = None
+    primary_backup_base_url: Optional[str] = None
+    primary_backup_model: Optional[str] = None
+    primary_backup_timeout: Optional[int] = None
+    secondary_backup_api_key: Optional[str] = None
+    secondary_backup_base_url: Optional[str] = None
+    secondary_backup_model: Optional[str] = None
+    secondary_backup_timeout: Optional[int] = None
 
 @dataclass
 class EmbeddingConfig:
@@ -36,6 +44,10 @@ class EmbeddingConfig:
     embedding_base_url: str
     embedding_model: str
     embedding_timeout: int
+    embedding_backup_api_key: Optional[str] = None
+    embedding_backup_base_url: Optional[str] = None
+    embedding_backup_model: Optional[str] = None
+    embedding_backup_timeout: Optional[int] = None
 
 @dataclass
 class AppConfig:
@@ -79,14 +91,26 @@ def load_config(config_path: str = "config/config.yaml") -> AppConfig:
             secondary_api_key=raw_config['llm'].get('secondary_api_key', 'not-needed'),
             secondary_base_url=raw_config['llm'].get('secondary_base_url', "http://localhost:1234/v1"),
             secondary_model=raw_config['llm'].get('secondary_model', "gemma-3-12b-it"),
-            secondary_timeout=raw_config['llm'].get('secondary_timeout', 60)
+            secondary_timeout=raw_config['llm'].get('secondary_timeout', 60),
+            primary_backup_api_key=raw_config['llm'].get('primary_backup_api_key', 'not-needed'),
+            primary_backup_base_url=raw_config['llm'].get('primary_backup_base_url', "http://localhost:1234/v1"),
+            primary_backup_model=raw_config['llm'].get('primary_backup_model'),
+            primary_backup_timeout=raw_config['llm'].get('primary_backup_timeout', 120),
+            secondary_backup_api_key=raw_config['llm'].get('secondary_backup_api_key', 'not-needed'),
+            secondary_backup_base_url=raw_config['llm'].get('secondary_backup_base_url', "http://localhost:1234/v1"),
+            secondary_backup_model=raw_config['llm'].get('secondary_backup_model'),
+            secondary_backup_timeout=raw_config['llm'].get('secondary_backup_timeout', 60)
         )
 
         emb_conf = EmbeddingConfig(
             embedding_api_key=raw_config.get('embeddings', {}).get('embedding_api_key', 'not-needed'),
             embedding_base_url=raw_config.get('embeddings', {}).get('embedding_base_url', "http://localhost:1234/v1"),
             embedding_model=raw_config.get('embeddings', {}).get('embedding_model', "text-embedding-3-small"),
-            embedding_timeout=raw_config.get('embeddings', {}).get('embedding_timeout', 60)
+            embedding_timeout=raw_config.get('embeddings', {}).get('embedding_timeout', 60),
+            embedding_backup_api_key=raw_config.get('embeddings', {}).get('embedding_backup_api_key', 'not-needed'),
+            embedding_backup_base_url=raw_config.get('embeddings', {}).get('embedding_backup_base_url', "http://localhost:1234/v1"),
+            embedding_backup_model=raw_config.get('embeddings', {}).get('embedding_backup_model'),
+            embedding_backup_timeout=raw_config.get('embeddings', {}).get('embedding_backup_timeout', 60)
         )
 
         themes = []

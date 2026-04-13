@@ -7,12 +7,20 @@ telegram_bot_token: "YOUR_TELEGRAM_BOT_TOKEN"
 llm:
   primary_api_key: "YOUR_PRIMARY_API_KEY"
   primary_base_url: "https://generativelanguage.googleapis.com/v1beta/openai/"
-  primary_model: "gemma-3-27b-it"
+  primary_model: "gemma-4-26b-a4b-it"
   primary_timeout: 90
+  primary_backup_api_key: "-"
+  primary_backup_base_url: "http://192.168.1.224:13305/api/v1/"
+  primary_backup_model: "Gemma-4-26B-A4B-it-GGUF"
+  primary_backup_timeout: 120
   secondary_api_key: "YOUR_SECONDARY_API_KEY"
   secondary_base_url: "https://generativelanguage.googleapis.com/v1beta/openai/"
-  secondary_model: "gemma-3-12b-it"
+  secondary_model: "gemma-3-27b-it"
   secondary_timeout: 120
+  secondary_backup_api_key: "-"
+  secondary_backup_base_url: "http://192.168.1.224:13305/api/v1/"
+  secondary_backup_model: "Gemma-4-26B-A4B-it-GGUF"
+  secondary_backup_timeout: 120
 
 # Embedding Configuration: used for duplicate detection and similarity searches.
 embeddings:
@@ -20,12 +28,16 @@ embeddings:
   embedding_base_url: "https://generativelanguage.googleapis.com/v1beta/openai/"
   embedding_model: "gemini-embedding-001"
   embedding_timeout: 60
+  embedding_backup_api_key: "-"
+  embedding_backup_base_url: "http://localhost:1234/v1"
+  embedding_backup_model: "text-embedding-3-small"
+  embedding_backup_timeout: 60
 
 # Global Application Settings
 fetch_interval_minutes: 15
 max_article_age_hours: 8
 log_retention_days: 10
-stats_retention_days: 30
+stats_retention_days: 60
 duplicate_check_days: 2
 database_path: "data/news_feed.db"
 debug: true
@@ -34,7 +46,7 @@ dev_mode: false
 # Posting Thresholds: An article is posted if all scores are met, or if, between importance and urgency, one is 1 point below, but the other is at least 1 point above.
 min_relevance_score: 8
 min_importance_score: 8
-min_urgency_score: 7
+min_urgency_score: 6
 
 # Themes and Channels: Define topics, target channels, and source RSS feeds.
 themes:
@@ -52,7 +64,7 @@ themes:
       FOCUS on events with significant societal impact on the daily lives of people in Portugal, major political developments, national economic shifts, or significant infrastructure changes.
       REJECT minor local crime stories, routine administrative news, sports match results, celebrity gossip, or opinion pieces without major factual weight.
       REJECT if the content is primarily a video or audio with little text.
-      REJECT newsletters, daily briefings, 'roundups', or articles summarizing multiple unrelated topics.
+      REJECT newsletters, daily briefings, 'roundups', live stories with multiple short updates, or articles summarizing multiple unrelated topics.
       High importance means events of national interest or history-making moments for the country.
 
   - name: "Breaking News - World"
@@ -72,7 +84,7 @@ themes:
       FOCUS on events with impact on people's daily lives or significant geopolitical shifts.
       REJECT minor updates on ongoing conflicts, local crime stories, opinion pieces, or celebrity gossip.
       REJECT if the content is primarily a video or audio with little text.
-      REJECT newsletters, daily briefings, 'roundups', or articles summarizing multiple unrelated topics.
+      REJECT newsletters, daily briefings, 'roundups', live stories with multiple short updates, or articles summarizing multiple unrelated topics.
       High importance means history-making events.
 
   - name: "Science News"
@@ -96,7 +108,7 @@ themes:
       Focus on hard science and significant advancements.
     min_relevance_score: 8
     min_importance_score: 7
-    min_urgency_score: 7
+    min_urgency_score: 6
 
   - name: "Tech News"
     channel_id: "-100_YOUR_CHANNEL_ID"
@@ -114,7 +126,7 @@ themes:
       cutting-edge technology, major software releases, significant hardware innovations, AI breakthroughs, startup ecosystem shifts.
       STRICTLY REJECT sales, deals, promotions, 'best of' lists, minor gadget accessories, gaming discounts, or affiliate-link heavy content.
       REJECT if the content is primarily a video or audio with little text.
-      REJECT newsletters, daily briefings, 'roundups', or articles summarizing multiple unrelated topics.
+      REJECT newsletters, daily briefings, 'roundups', live stories with multiple short updates, or articles summarizing multiple unrelated topics.
       Only meaningful tech news.
 
   - name: "Entertainment News"
@@ -135,5 +147,5 @@ themes:
       FOCUS on events with widespread cultural impact or major industry developments.
       REJECT minor tabloid rumors, routine red carpet photos, day-to-day social media posts without significant context, or niche indie news.
       REJECT if the content is primarily a video or audio with little text.
-      REJECT articles with spoilers or plot details, newsletters, daily briefings, 'roundups', or articles summarizing multiple unrelated topics.
+      REJECT articles with spoilers or plot details, newsletters, daily briefings, 'roundups', live stories with multiple short updates, or articles summarizing multiple unrelated topics.
       High importance means industry-defining moments or cultural phenomena.

@@ -28,6 +28,16 @@ class NewsAnalyzer:
         )
         self.primary_model = llm_config.primary_model
 
+        self.primary_backup_client = None
+        self.primary_backup_model = None
+        if llm_config.primary_backup_model:
+            self.primary_backup_client = OpenAI(
+                api_key=llm_config.primary_backup_api_key,
+                base_url=llm_config.primary_backup_base_url,
+                timeout=llm_config.primary_backup_timeout
+            )
+            self.primary_backup_model = llm_config.primary_backup_model
+
         # Secondary client for fast tasks
         self.secondary_client = OpenAI(
             api_key=llm_config.secondary_api_key,
@@ -36,6 +46,16 @@ class NewsAnalyzer:
         )
         self.secondary_model = llm_config.secondary_model
 
+        self.secondary_backup_client = None
+        self.secondary_backup_model = None
+        if llm_config.secondary_backup_model:
+            self.secondary_backup_client = OpenAI(
+                api_key=llm_config.secondary_backup_api_key,
+                base_url=llm_config.secondary_backup_base_url,
+                timeout=llm_config.secondary_backup_timeout
+            )
+            self.secondary_backup_model = llm_config.secondary_backup_model
+
         # Embedding client
         self.embedding_client = OpenAI(
             api_key=embedding_config.embedding_api_key,
@@ -43,6 +63,67 @@ class NewsAnalyzer:
             timeout=embedding_config.embedding_timeout
         )
         self.embedding_model = embedding_config.embedding_model
+
+        self.embedding_backup_client = None
+        self.embedding_backup_model = None
+        if embedding_config.embedding_backup_model:
+            self.embedding_backup_client = OpenAI(
+                api_key=embedding_config.embedding_backup_api_key,
+                base_url=embedding_config.embedding_backup_base_url,
+                timeout=embedding_config.embedding_backup_timeout
+            )
+            self.embedding_backup_model = embedding_config.embedding_backup_model
+
+    def _call_llm_with_fallback(self, system_prompt: str, user_content: str, client: OpenAI, model: str, backup_client: Optional[OpenAI], backup_model: Optional[str], logger_tag: str, article_title: str) -> Optional[str]:
+        def do_call(cur_client, cur_model):
+            if "google" in str(cur_client.base_url).lower():
+                llm_message = [
+                    {"role": "user", "content": f"{system_prompt}\n\nUSER REQUEST:\n{user_content}"}
+                ]
+            else:
+                llm_message = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content}
+                ]
+
+            max_retries = 2
+            for attempt in range(1, max_retries + 1):
+                try:
+                    response = cur_client.chat.completions.create(
+                        model=cur_model,
+                        messages=llm_message,
+                        extra_body={
+                            'extra_body': {
+                                "google": {
+                                    "thinking_config": {
+                                        "thinking_level": "minimal",
+                                        "include_thoughts": False
+                                    }
+                                }
+                            }
+                        }
+                    )
+
+                    response_content = response.choices[0].message.content
+                    if not response_content:
+                        logger.warning(f"[{logger_tag}] Empty response from LLM for '{article_title}' (possibly safety block) - attempt {attempt}")
+                        continue
+                    return response_content
+                except Exception as exc:
+                    logger.error(f"[{logger_tag}] Error with model {cur_model} for '{article_title}' (attempt {attempt}): {exc}")
+                    if attempt < max_retries:
+                        delay = extract_retry_delay(exc)
+                        wait_time = min(delay + 1 if delay > 0 else 5, 60)
+                        logger.debug(f"[{logger_tag}] Retrying in {wait_time}s")
+                        time.sleep(wait_time)
+            return None
+
+        result = do_call(client, model)
+        if result is None and backup_client:
+            logger.warning(f"[{logger_tag}] Main model failed for '{article_title}'. Trying backup model: {backup_model}")
+            result = do_call(backup_client, backup_model)
+
+        return result
 
     def get_embedding(self, text: str) -> list:
         """
@@ -56,6 +137,16 @@ class NewsAnalyzer:
             return response.data[0].embedding
         except Exception as e:
             logger.error(f"Error generating embedding: {e}")
+            if hasattr(self, 'embedding_backup_client') and self.embedding_backup_client:
+                logger.info("Trying backup embedding model...")
+                try:
+                    response = self.embedding_backup_client.embeddings.create(
+                        input=text,
+                        model=self.embedding_backup_model
+                    )
+                    return response.data[0].embedding
+                except Exception as be:
+                    logger.error(f"Error generating embedding with backup: {be}")
             return []
 
     def _fallback_sequence_matcher(self, article, recent_articles: list, title_threshold: float = 0.55, summary_threshold: float = 0.5) -> Optional[tuple]:
@@ -197,34 +288,19 @@ class NewsAnalyzer:
 
         user_content = f"Title: {article_title}\nContent/Summary: {article_content}"
 
-        # Gemini's OpenAI-compatible API often fails with 'system' role for some models (Gemma)
-        if "google" in str(self.primary_client.base_url).lower():
-            llm_message = [
-                {"role": "user", "content": f"{system_prompt}\n\nUSER REQUEST:\n{user_content}"}
-            ]
+        response_content = self._call_llm_with_fallback(
+            system_prompt=system_prompt,
+            user_content=user_content,
+            client=self.primary_client,
+            model=self.primary_model,
+            backup_client=self.primary_backup_client,
+            backup_model=self.primary_backup_model,
+            logger_tag="Score Analyzer",
+            article_title=article_title
+        )
 
-        else:
-            llm_message = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content}
-            ]
-
-        # logger.debug(f"[Score Analyzer] LLM message for article scoring: {llm_message}")
-
-        max_retries = 2
-        response_content = None
-        for attempt in range(1, max_retries + 1):
+        if response_content:
             try:
-                response = self.primary_client.chat.completions.create(
-                    model=self.primary_model,
-                    messages=llm_message
-                )
-
-                response_content = response.choices[0].message.content
-                if not response_content:
-                    logger.warning(f"[Score Analyzer] Empty response from LLM for '{article_title}' (possibly safety block) - attempt {attempt}")
-                    continue
-
                 content = extract_json(response_content)
                 data = json.loads(content, strict=False)
 
@@ -234,17 +310,8 @@ class NewsAnalyzer:
                     urgency_score=data.get('urgency_score', 0),
                     reasoning=data.get('reasoning', 'No reasoning provided')
                 )
-
-            except Exception as exc:
-                logger.error(f"[Score Analyzer] Error analyzing scores for '{article_title}' (attempt {attempt}): {exc}")
-                logger.debug(f"[Score Analyzer] Error analyzing scores. Sent content: {llm_message}")
-                logger.debug(f"[Score Analyzer] Error analyzing scores. Received content: {response_content}")
-
-                if attempt < max_retries:
-                    delay = extract_retry_delay(exc)
-                    wait_time = min(delay + 1 if delay > 0 else 5, 60) # sleep 1 second more than the delay, but no more than 60 seconds
-                    logger.debug(f"[Score Analyzer] Retrying for '{article_title}' in {wait_time}s (attempt {attempt + 1})")
-                    time.sleep(wait_time)
+            except Exception as e:
+                logger.error(f"[Score Analyzer] Error parsing JSON from model output: {e}")
 
         return AnalysisResult(
             relevance_score=0,
@@ -301,35 +368,21 @@ class NewsAnalyzer:
 
         user_content = f"Title: {article_title}\nContent/Summary: {article_content}"
 
-        # Gemini's OpenAI-compatible API often fails with 'system' role for some models (Gemma)
-        if "google" in str(self.primary_client.base_url).lower():
-            llm_message = [
-                {"role": "user", "content": f"{system_prompt}\n\nUSER REQUEST:\n{user_content}"}
-            ]
-        else:
-            llm_message = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content}
-            ]
+        response_content = self._call_llm_with_fallback(
+            system_prompt=system_prompt,
+            user_content=user_content,
+            client=self.primary_client,
+            model=self.primary_model,
+            backup_client=self.primary_backup_client,
+            backup_model=self.primary_backup_model,
+            logger_tag="Summary Generator",
+            article_title=article_title
+        )
 
-        # logger.debug(f"[Summary Generator] LLM message for article summaries: {llm_message}")
-
-        max_retries = 2
-        response_content = None
-        for attempt in range(1, max_retries + 1):
+        if response_content:
             try:
-                response = self.primary_client.chat.completions.create(
-                    model=self.primary_model,
-                    messages=llm_message
-                )
-
-                response_content = response.choices[0].message.content
-                if not response_content:
-                    logger.warning(f"[Summary Generator] Empty response from LLM for '{article_title}' (possibly safety block) - attempt {attempt}")
-                    continue
-
                 response_content = extract_json(response_content)
-                data = json.loads(response_content, strict=False) # allow non-strict JSON parsing, in case the LLM doesn't follow the instructions and returns actual line breaks instead of \n
+                data = json.loads(response_content, strict=False) # allow non-strict JSON parsing
 
                 return {
                     'short_summary': data.get('short_summary', ''),
@@ -337,17 +390,8 @@ class NewsAnalyzer:
                     'is_valid_news': data.get('is_valid_news', True),
                     'rejection_reason': data.get('rejection_reason', '')
                 }
-
-            except Exception as exc:
-                logger.error(f"[Summary Generator] Error generating summaries for '{article_title}' (attempt {attempt}): {exc}")
-                logger.debug(f"[Summary Generator] Error generating summaries. Sent content: {llm_message}")
-                logger.debug(f"[Summary Generator] Error generating summaries. Received content: {response_content}")
-
-                if attempt < max_retries:
-                    delay = extract_retry_delay(exc)
-                    wait_time = min(delay + 1 if delay > 0 else 5, 60) # sleep 1 second more than the delay, but no more than 60 seconds
-                    logger.debug(f"[Summary Generator] Retrying for '{article_title}' in {wait_time}s (attempt {attempt + 1})")
-                    time.sleep(wait_time)
+            except Exception as e:
+                logger.error(f"[Summary Generator] Error parsing JSON from model output: {e}")
 
         return {
             'short_summary': '',
@@ -392,63 +436,42 @@ class NewsAnalyzer:
 
         user_content = f"Title: {article_title}\nContent/Summary: {article_content[:2000]}" # Limit content for secondary LLM
 
-        if "google" in str(self.secondary_client.base_url).lower():
-            llm_message = [
-                {"role": "user", "content": f"{system_prompt}\n\nUSER REQUEST:\n{user_content}"}
-            ]
-        else:
-            llm_message = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content}
-            ]
+        response_content = self._call_llm_with_fallback(
+            system_prompt=system_prompt,
+            user_content=user_content,
+            client=self.secondary_client,
+            model=self.secondary_model,
+            backup_client=self.secondary_backup_client,
+            backup_model=self.secondary_backup_model,
+            logger_tag="Hashtag Generator",
+            article_title=article_title
+        )
 
-        max_retries = 2
-        response_content = None
-        for attempt in range(1, max_retries + 1):
-            try:
-                response = self.secondary_client.chat.completions.create(
-                    model=self.secondary_model,
-                    messages=llm_message
-                )
+        if response_content:
+            hashtags = response_content.strip()
+            if hashtags:
+                # Clean up: ensure multi-word hashtags are not separated by spaces
+                if '#' in hashtags:
+                    parts = hashtags.split('#')
+                    cleaned_parts = []
+                    # Handle text before the first # (treat as separate words/hashtags)
+                    if parts[0].strip():
+                        cleaned_parts.extend(parts[0].split())
 
-                response_content = response.choices[0].message.content.strip()
-                if not response_content:
-                    logger.warning(f"[Hashtag Generator] Empty response from LLM for '{article_title}' (possibly safety block) - attempt {attempt}")
-                    continue
+                    # Handle parts starting with # (join multi-word parts)
+                    for part in parts[1:]:
+                        # Remove all whitespace within the hashtag
+                        cleaned = "".join(part.split())
+                        if cleaned:
+                            cleaned_parts.append(cleaned)
 
-                hashtags = response_content
-                if hashtags:
-                    # Clean up: ensure multi-word hashtags are not separated by spaces
-                    if '#' in hashtags:
-                        parts = hashtags.split('#')
-                        cleaned_parts = []
-                        # Handle text before the first # (treat as separate words/hashtags)
-                        if parts[0].strip():
-                            cleaned_parts.extend(parts[0].split())
+                    hashtags = " ".join([f"#{p}" for p in cleaned_parts])
+                else:
+                    # No hashtags present, treat every word as a separate hashtag
+                    words = hashtags.split()
+                    hashtags = " ".join([f"#{w.lstrip('#')}" for w in words])
 
-                        # Handle parts starting with # (join multi-word parts)
-                        for part in parts[1:]:
-                            # Remove all whitespace within the hashtag
-                            cleaned = "".join(part.split())
-                            if cleaned:
-                                cleaned_parts.append(cleaned)
-
-                        hashtags = " ".join([f"#{p}" for p in cleaned_parts])
-                    else:
-                        # No hashtags present, treat every word as a separate hashtag
-                        words = hashtags.split()
-                        hashtags = " ".join([f"#{w.lstrip('#')}" for w in words])
-
-                    logger.debug(f"[Hashtag Generator] Generated: {hashtags}")
-                    return hashtags
-
-            except Exception as exc:
-                logger.error(f"[Hashtag Generator] Error generating hashtags for '{article_title}' (attempt {attempt}): {exc}")
-
-                if attempt < max_retries:
-                    delay = extract_retry_delay(exc)
-                    wait_time = min(delay + 1 if delay > 0 else 5, 60) # sleep 1 second more than the delay, but no more than 60 seconds
-                    logger.debug(f"[Hashtag Generator] Retrying for '{article_title}' in {wait_time}s (attempt {attempt + 1})")
-                    time.sleep(wait_time)
+                logger.debug(f"[Hashtag Generator] Generated: {hashtags}")
+                return hashtags
 
         return ""

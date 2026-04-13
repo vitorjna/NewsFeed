@@ -2,70 +2,79 @@ import sys
 import os
 from unittest.mock import MagicMock, patch
 
-# Add src to path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
+# Add the project root to sys.path so we can import src as a package
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-# Robust mock for relative imports
 import types
-from unittest.mock import MagicMock
 
-# Create mock utils module
-utils_mock = types.ModuleType('utils')
+# Mock utils module properly as a submodule of src
+utils_mock = types.ModuleType('src.utils')
 utils_mock.setup_logger = MagicMock(return_value=MagicMock())
 utils_mock.extract_json = MagicMock(side_effect=lambda x: x)
-
-# Inject into sys.modules
-sys.modules['utils'] = utils_mock
+utils_mock.extract_retry_delay = MagicMock(return_value=1)
 sys.modules['src.utils'] = utils_mock
 
-# Now we can import because we've handled the external dependency
-# But we still have relative imports in the files themselves.
-# Let's mock the entire modules to verify the class logic
-sys.modules['.utils'] = utils_mock
-
-from config import LLMConfig
-from analyzer_llm import NewsAnalyzer
+from src.config import LLMConfig, EmbeddingConfig
+from src.analyzer_llm import NewsAnalyzer
 
 def test_config_initialization():
     print("Testing NewsAnalyzer initialization...")
-    config = LLMConfig(
+    llm_config = LLMConfig(
         primary_api_key="p-key",
         primary_base_url="http://primary/v1",
         primary_model="p-model",
+        primary_timeout=120,
+        primary_backup_api_key="pb-key",
+        primary_backup_base_url="http://pb/v1",
+        primary_backup_model="pb-model",
+        primary_backup_timeout=120,
         secondary_api_key="s-key",
         secondary_base_url="http://secondary/v1",
-        secondary_model="s-model"
+        secondary_model="s-model",
+        secondary_timeout=60,
+        secondary_backup_api_key="sb-key",
+        secondary_backup_base_url="http://sb/v1",
+        secondary_backup_model="sb-model",
+        secondary_backup_timeout=60
     )
 
-    with patch('analyzer_llm.OpenAI') as mock_openai:
-        analyzer = NewsAnalyzer(config)
+    embedding_config = EmbeddingConfig(
+        embedding_api_key="e-key",
+        embedding_base_url="http://e/v1",
+        embedding_model="e-model",
+        embedding_timeout=60,
+        embedding_backup_api_key="eb-key",
+        embedding_backup_base_url="http://eb/v1",
+        embedding_backup_model="eb-model",
+        embedding_backup_timeout=60
+    )
 
-        # Verify two clients created
-        assert mock_openai.call_count == 2
+    with patch('src.analyzer_llm.OpenAI') as mock_openai:
+        analyzer = NewsAnalyzer(llm_config, embedding_config)
 
-        # Check primary client params (first call)
-        args, kwargs = mock_openai.call_args_list[0]
-        assert kwargs['api_key'] == "p-key"
-        assert kwargs['base_url'] == "http://primary/v1"
-
-        # Check secondary client params (second call)
-        args, kwargs = mock_openai.call_args_list[1]
-        assert kwargs['api_key'] == "s-key"
-        assert kwargs['base_url'] == "http://secondary/v1"
+        # Verify 6 clients created
+        assert mock_openai.call_count == 6
 
         assert analyzer.primary_model == "p-model"
+        assert analyzer.primary_backup_model == "pb-model"
         assert analyzer.secondary_model == "s-model"
-        print("✅ Initialization test passed")
+        assert analyzer.secondary_backup_model == "sb-model"
+        assert analyzer.embedding_model == "e-model"
+        assert analyzer.embedding_backup_model == "eb-model"
+        print("[PASS] Initialization test passed")
 
 def test_client_usage():
     print("Testing NewsAnalyzer client usage...")
-    config = LLMConfig(
-        primary_api_key="p-key", primary_base_url="http://p", primary_model="p-m",
-        secondary_api_key="s-key", secondary_base_url="http://s", secondary_model="s-m"
+    llm_config = LLMConfig(
+        primary_api_key="p-key", primary_base_url="http://p", primary_model="p-m", primary_timeout=120,
+        secondary_api_key="s-key", secondary_base_url="http://s", secondary_model="s-m", secondary_timeout=120
+    )
+    embedding_config = EmbeddingConfig(
+        embedding_api_key="e-key", embedding_base_url="http://e", embedding_model="e-m", embedding_timeout=60
     )
 
-    with patch('analyzer_llm.OpenAI') as mock_openai:
-        analyzer = NewsAnalyzer(config)
+    with patch('src.analyzer_llm.OpenAI') as mock_openai:
+        analyzer = NewsAnalyzer(llm_config, embedding_config)
 
         # Mock completions.create for both clients
         analyzer.primary_client.chat.completions.create = MagicMock()
@@ -74,28 +83,75 @@ def test_client_usage():
         # Test analyze_scores (should use primary)
         analyzer.analyze_scores("Title", "Content", "Focus")
         analyzer.primary_client.chat.completions.create.assert_called()
-        print("✅ analyze_scores uses primary client")
+        print("[PASS] analyze_scores uses primary client")
 
-        # Test analyze_summaries (should use primary)
-        analyzer.analyze_summaries("Title", "Content")
+        # Test generate_summaries (should use primary)
+        analyzer.generate_summaries("Title", "Content")
         assert analyzer.primary_client.chat.completions.create.call_count == 2
-        print("✅ analyze_summaries uses primary client")
+        print("[PASS] generate_summaries uses primary client")
 
-        # Test check_for_duplicate (should use secondary)
-        article_mock = MagicMock()
-        article_mock.title = "New Title"
-        article_mock.rss_summary = "New Summary"
-        analyzer.check_for_duplicate(article_mock, [("Old Title", "Old Summary")])
+        # Test generate_hashtags (should use secondary)
+        analyzer.generate_hashtags("Title", "Content")
         analyzer.secondary_client.chat.completions.create.assert_called()
-        print("✅ check_for_duplicate uses secondary client")
+        print("[PASS] generate_hashtags uses secondary client")
+        print("[PASS] Client usage test passed")
+
+def test_fallback_logic():
+    print("Testing NewsAnalyzer fallback logic...")
+    llm_config = LLMConfig(
+        primary_api_key="p-key", primary_base_url="http://p", primary_model="p-m", primary_timeout=120,
+        primary_backup_api_key="pb-key", primary_backup_base_url="http://pb", primary_backup_model="pb-m", primary_backup_timeout=120,
+        secondary_api_key="s-key", secondary_base_url="http://s", secondary_model="s-m", secondary_timeout=60
+    )
+    embedding_config = EmbeddingConfig(
+        embedding_api_key="e-key", embedding_base_url="http://e", embedding_model="e-m", embedding_timeout=60
+    )
+
+    with patch('src.analyzer_llm.OpenAI') as mock_openai, patch('time.sleep') as mock_sleep:
+        # Create separate mocks for each call to OpenAI()
+        m1, m2, m3, m4 = MagicMock(), MagicMock(), MagicMock(), MagicMock()
+        mock_openai.side_effect = [m1, m2, m3, m4]
+        
+        # m1: primary_client
+        # m2: primary_backup_client
+        # m3: secondary_client
+        # m4: embedding_client
+        
+        analyzer = NewsAnalyzer(llm_config, embedding_config)
+        
+        # Verify separate mocks were assigned
+        assert analyzer.primary_client == m1
+        assert analyzer.primary_backup_client == m2
+        
+        # Mock the primary client to fail
+        m1.chat.completions.create.side_effect = Exception("Primary failed")
+        
+        # Mock response for backup to succeed
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = '{"relevance_score": 9, "importance_score": 8, "urgency_score": 7, "reasoning": "Backup worked"}'
+        m2.chat.completions.create.return_value = mock_response
+
+        # Call analyze_scores
+        result = analyzer.analyze_scores("Test Title", "Test Content", "Test Focus")
+        
+        print(f"Result scores: R={result.relevance_score}, I={result.importance_score}, U={result.urgency_score}")
+        print(f"Reasoning: {result.reasoning}")
+        
+        # Verify fallback
+        assert result.relevance_score == 9, f"Expected 9, got {result.relevance_score}"
+        assert m1.chat.completions.create.call_count >= 1
+        assert m2.chat.completions.create.called
+        print("[PASS] Fallback logic test passed")
 
 if __name__ == "__main__":
     try:
         test_config_initialization()
         test_client_usage()
+        test_fallback_logic()
         print("\nAll verification tests passed!")
     except Exception as e:
-        print(f"\n❌ Test failed: {e}")
+        print(f"\n[FAIL] Test failed: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
