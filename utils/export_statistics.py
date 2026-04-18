@@ -5,14 +5,14 @@ Opens the database in read-only mode so it does not block
 the main application from writing.
 
 Usage:
-    python export_statistics.py <YYYY-MM-DD> [--output <path>] [--db <path>] [--themes [dir]]
+    python utils/export_statistics.py <YYYY-MM-DD> [--output <path>] [--db <path>] [--themes [dir]]
 
 Examples:
-    python export_statistics.py 2026-03-04
-    python export_statistics.py 2026-03-04 --output reports/march.txt
-    python export_statistics.py 2026-03-04 --db data/news_feed.db
-    python export_statistics.py 2026-03-04 --themes
-    python export_statistics.py 2026-03-04 --themes exports/themes_stats
+    python utils/export_statistics.py 2026-03-04
+    python utils/export_statistics.py 2026-03-04 --output reports/march.txt
+    python utils/export_statistics.py 2026-03-04 --db data/news_feed.db
+    python utils/export_statistics.py 2026-03-04 --themes
+    python utils/export_statistics.py 2026-03-04 --themes exports/themes_stats
 
 Note: Using --themes will export daily totals for each theme into separate files 
 within the specified directory (defaults to 'stats').
@@ -23,12 +23,27 @@ import os
 import sqlite3
 import argparse
 import re
+import yaml
 from datetime import datetime
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+def load_config(config_path=None):
+    if config_path is None:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.abspath(os.path.join(script_dir, ".."))
+        config_path = os.path.join(project_root, "config/config.yaml")
+
+    if not os.path.exists(config_path):
+        return None
+    with open(config_path, 'r', encoding='utf-8') as f:
+        try:
+            return yaml.safe_load(f)
+        except:
+            return None
 
 
 def open_readonly(db_path: str) -> sqlite3.Connection:
@@ -220,7 +235,19 @@ def export_statistics(db_path: str, target_date_str: str, output_path: str, them
         conn.close()
 
 
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+def main(argv: list[str] | None = None) -> None:
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.abspath(os.path.join(script_dir, ".."))
+
+    config = load_config()
+    db_path_default = config.get('database_path', 'data/news_feed.db') if config else 'data/news_feed.db'
+    if not os.path.isabs(db_path_default):
+        db_path_default = os.path.join(project_root, db_path_default)
+        
+    stats_dir_default = config.get('stats_folder', 'stats') if config else 'stats'
+    if not os.path.isabs(stats_dir_default):
+        stats_dir_default = os.path.join(project_root, stats_dir_default)
+
     parser = argparse.ArgumentParser(
         description="Export NewsFeed statistics (feed-level or theme-level) for a given day."
     )
@@ -231,25 +258,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--output", "-o",
         default=None,
-        help="Output file path.  Defaults to stats/statistics_<DATE>.txt",
+        help=f"Output file path. Defaults to {stats_dir_default}/statistics_<DATE>.txt",
     )
     parser.add_argument(
         "--db",
-        default="data/news_feed.db",
-        help="Path to the SQLite database.  Defaults to data/news_feed.db",
+        default=db_path_default,
+        help=f"Path to the SQLite database. Defaults to {db_path_default}",
     )
     parser.add_argument(
         "--themes",
         nargs='?',
-        const='stats',
+        const=stats_dir_default,
         default=None,
-        help="Export daily theme totals to the specified directory (defaults to 'stats').",
+        help=f"Export daily theme totals to the specified directory (defaults to '{stats_dir_default}').",
     )
-    return parser.parse_args(argv)
-
-
-def main(argv: list[str] | None = None) -> None:
-    args = parse_args(argv)
+    args = parser.parse_args(argv)
 
     # Validate date format
     try:
@@ -263,9 +286,12 @@ def main(argv: list[str] | None = None) -> None:
         print(f"Error: Database file not found at '{args.db}'.", file=sys.stderr)
         sys.exit(1)
 
-    output_path = args.output or f"stats/statistics_{args.date}.txt"
+    output_path = args.output or os.path.join(stats_dir_default, f"statistics_{args.date}.txt")
 
-    export_statistics(args.db, args.date, output_path, themes_dir=args.themes)
+    # If --themes was used without a value, it defaults to stats_dir_default
+    themes_dir = args.themes
+    
+    export_statistics(args.db, args.date, output_path, themes_dir=themes_dir)
 
 
 if __name__ == "__main__":

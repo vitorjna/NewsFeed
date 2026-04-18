@@ -57,6 +57,9 @@ class AppConfig:
     fetch_interval_minutes: int
     max_article_age_hours: int
     database_path: str
+    backup_folder: str
+    logs_folder: str
+    stats_folder: str
     min_relevance_score: int
     min_importance_score: int
     min_urgency_score: int
@@ -122,6 +125,9 @@ def load_config(config_path: str = "config/config.yaml") -> AppConfig:
             fetch_interval_minutes=raw_config.get('fetch_interval_minutes', 15),
             max_article_age_hours=raw_config.get('max_article_age_hours', 8),
             database_path=raw_config.get('database_path', 'data/newsfeed.db'),
+            backup_folder=raw_config.get('backup_folder'),
+            logs_folder=raw_config.get('logs_folder', 'logs'),
+            stats_folder=raw_config.get('stats_folder', 'stats'),
             min_relevance_score=raw_config.get('min_relevance_score', 8),
             min_importance_score=raw_config.get('min_importance_score', 7),
             min_urgency_score=raw_config.get('min_urgency_score', 7),

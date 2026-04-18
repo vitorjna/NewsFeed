@@ -21,7 +21,7 @@ _MD_LINK_PATTERN = re.compile(r'\[(.*?)\]\((.*?)\)')
 _RETRY_DELAY_PATTERN_1 = re.compile(r'retry in ([\d\.]+)s', re.IGNORECASE)
 _RETRY_DELAY_PATTERN_2 = re.compile(r"['\"]retryDelay['\"]\s*:\s*['\"]([\d\.]+)s['\"]")
 
-def setup_logger(name: str = "NewsFeedApp", level=logging.INFO):
+def setup_logger(name: str = "NewsFeedApp", level=logging.INFO, log_dir: str = "logs"):
     """
     Sets up a logger with stdout and rotating file handler.
     """
@@ -42,9 +42,7 @@ def setup_logger(name: str = "NewsFeedApp", level=logging.INFO):
         logger.addHandler(_shared_stream_handler)
 
         # Rotating file handler
-        log_dir = "logs"
-        if not os.path.exists(log_dir):
-            os.makedirs(log_dir)
+        os.makedirs(log_dir, exist_ok=True)
 
         if _shared_file_handler is None:
             date_str = datetime.now().strftime("%Y-%m-%d")
@@ -54,7 +52,6 @@ def setup_logger(name: str = "NewsFeedApp", level=logging.INFO):
                 backupCount=9,
                 encoding='utf-8'
             )
-            # _shared_file_handler.doRollover() # we now use a new file every day
             _shared_file_handler.setFormatter(formatter)
         logger.addHandler(_shared_file_handler)
 

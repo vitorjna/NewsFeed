@@ -11,7 +11,7 @@ in the 'stats/' directory of this project.
 
 How to use:
 1. From the project root, simply run:
-   python generate_charts.py
+   python utils/generate_charts.py
 2. The script will automatically scan the 'stats/' folder and generate a 'charts.html' file.
 3. Open 'charts.html' in your browser to view the interactive charts.
 
@@ -21,6 +21,13 @@ Note: No external dependencies are required. Uses standard libraries and Chart.j
 import os
 import glob
 import json
+import yaml
+
+def load_config(config_path="config/config.yaml"):
+    if not os.path.exists(config_path):
+        return None
+    with open(config_path, 'r', encoding='utf-8') as f:
+        return yaml.safe_load(f)
 
 def parse_file(filepath):
     data = {'dates': [], 'seen': [], 'pub': [], 'rate': []}
@@ -44,19 +51,24 @@ def parse_file(filepath):
 
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
-
-    # Priority 1: Check in 'stats' subdirectory (standard project structure)
-    stats_dir = os.path.join(script_dir, 'stats')
+    project_root = os.path.abspath(os.path.join(script_dir, ".."))
+    
+    config = load_config(os.path.join(project_root, 'config/config.yaml'))
+    
+    stats_dir_name = config.get('stats_folder', 'stats') if config else 'stats'
+    stats_dir = os.path.join(project_root, stats_dir_name)
+    
+    # Priority 1: Check in configured 'stats' subdirectory
     files = glob.glob(os.path.join(stats_dir, 'daily_*.txt'))
 
     # Priority 2: Check in current directory (if run from inside stats/ or if files moved)
     if not files:
-        files = glob.glob(os.path.join(script_dir, 'daily_*.txt'))
+        files = glob.glob(os.path.join(project_root, 'daily_*.txt'))
         if files:
-            stats_dir = script_dir
+            stats_dir = project_root
 
     if not files:
-        print(f"Error: No daily theme files (daily_*.txt) found in {os.path.join(script_dir, 'stats')} or {script_dir}.")
+        print(f"Error: No daily theme files (daily_*.txt) found in {stats_dir} or {project_root}.")
         return
 
     themes_data = {}
@@ -234,10 +246,10 @@ def main():
 </body>
 </html>
 """
-    output_path = os.path.join(script_dir, 'charts.html')
+    output_path = os.path.join(project_root, 'charts.html')
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(html_content)
-    print(f"Charts successfully generated. Open {{output_path}} in your browser to view.")
+    print(f"Charts successfully generated. Open {output_path} in your browser to view.")
 
 if __name__ == "__main__":
     main()

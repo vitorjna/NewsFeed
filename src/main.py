@@ -16,13 +16,16 @@ from .publisher import TelegramPublisher
 from .bot_manager import TelegramBotManager
 
 HEARTBEAT_FILE = "/tmp/newsfeed_heartbeat"
-logger = setup_logger("Main")
+logger = None
 
 class NewsFeedApp:
     def __init__(self, config_path: str = "config/config.yaml"):
         from . import analyzer_llm, article, fetcher, publisher, config as config_mod, cross_promoter, database
         self._is_running_cycle = False
         self.config = load_config(config_path)
+
+        global logger
+        logger = setup_logger("Main", log_dir=self.config.logs_folder)
 
         if self.config.debug:
             level = logging.DEBUG
@@ -152,9 +155,22 @@ class NewsFeedApp:
         self.db.optimize()
         logger.info("[Maintenance] DB maintenance completed")
 
+        if self.config.backup_folder:
+            import shutil
+            try:
+                os.makedirs(self.config.backup_folder, exist_ok=True)
+                db_filename = os.path.basename(self.config.database_path)
+                backup_path = os.path.join(self.config.backup_folder, db_filename)
+                logger.info(f"[Maintenance] Backing up database to {backup_path}")
+                # Using copyfile to avoid copying permissions which could fail across drives with different permission models
+                shutil.copyfile(self.config.database_path, backup_path)
+                logger.debug("[Maintenance] Database backup completed")
+            except Exception as e:
+                logger.error(f"[Maintenance] Error backing up database: {e}")
+
         # Cleanup old log and stats files
-        self._cleanup_old_files("logs", self.config.log_retention_days)
-        self._cleanup_old_files("stats", self.config.stats_retention_days)
+        self._cleanup_old_files(self.config.logs_folder, self.config.log_retention_days)
+        self._cleanup_old_files(self.config.stats_folder, self.config.stats_retention_days)
 
     def _cleanup_old_files(self, directory: str, retention_days: int):
         """Deletes files in the specified directory older than retention_days."""
@@ -216,10 +232,10 @@ class NewsFeedApp:
         self._perform_daily_maintenance()
 
         # Export stats for yesterday
-        os.makedirs("stats", exist_ok=True)
+        os.makedirs(self.config.stats_folder, exist_ok=True)
         yesterday_str = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-        self.db.export_statistics(f"stats/statistics_{yesterday_str}.txt", target_date_str=yesterday_str)
-        self.db.export_daily_theme_totals("stats", target_date_str=yesterday_str)
+        self.db.export_statistics(os.path.join(self.config.stats_folder, f"statistics_{yesterday_str}.txt"), target_date_str=yesterday_str)
+        self.db.export_daily_theme_totals(self.config.stats_folder, target_date_str=yesterday_str)
 
         self._restart_application()
         # logger.info("[Maintenance] Nightly routine completed")
@@ -265,7 +281,7 @@ class NewsFeedApp:
         schedule.every().day.at("03:00").do(self._nightly_routine)
 
         # Heartbeat schedule
-        # schedule.every(1).minutes.do(self._write_heartbeat)
+        schedule.every(5).minutes.do(self._write_heartbeat)
 
         # Cross-promotion schedule
         #schedule.every().day.at("09:00").do(

@@ -40,6 +40,9 @@ log_retention_days: 10
 stats_retention_days: 60
 duplicate_check_days: 2
 database_path: "data/news_feed.db"
+# backup_folder: "D:/backups/news_feed" # Optional: folder to backup the database to daily
+logs_folder: "logs"
+stats_folder: "stats"
 debug: true
 dev_mode: false
 
