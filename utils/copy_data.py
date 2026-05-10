@@ -46,12 +46,25 @@ def copy_data(data_type, external_dir, reverse=False):
         if os.path.exists(full_dst_path):
             print(f"Destination '{full_dst_path}' already exists. Overwriting...")
             if os.path.isdir(full_dst_path):
-                shutil.rmtree(full_dst_path)
+                def remove_readonly(func, path, exc_info):
+                    import stat
+                    os.chmod(path, stat.S_IWRITE)
+                    func(path)
+                shutil.rmtree(full_dst_path, onerror=remove_readonly)
             else:
                 os.remove(full_dst_path)
 
-        shutil.copytree(full_src_path, full_dst_path)
+        # Use shutil.copy to avoid "Operation not permitted" when copying metadata to some filesystems
+        shutil.copytree(full_src_path, full_dst_path, copy_function=shutil.copy)
         print(f"Successfully {action_verb.lower()} '{data_type}' to '{full_dst_path}'")
+    except shutil.Error as e:
+        # Ignore EPERM errors from copystat on directories, which are wrapped in shutil.Error
+        errors = [err for err in e.args[0] if not (isinstance(err, tuple) and len(err) >= 3 and "Operation not permitted" in str(err[2]))]
+        if errors:
+            print(f"Error during {action_verb.lower()}: {e}")
+            sys.exit(1)
+        else:
+            print(f"Successfully {action_verb.lower()} '{data_type}' to '{full_dst_path}' (ignored permission errors)")
     except Exception as e:
         print(f"Error during {action_verb.lower()}: {e}")
         sys.exit(1)
