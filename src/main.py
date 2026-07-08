@@ -98,7 +98,7 @@ class NewsFeedApp:
                     # Add a small delay to respect rate limits (especially for Gemini free tier)
                     if bWasProcessed:
                         if self.config.llm.primary_base_url and "google" in self.config.llm.primary_base_url.lower():
-                            await asyncio.sleep(2) # 30 RPM limit = 2s per request.
+                            await asyncio.sleep(4) # 15 RPM limit = 4s per request.
 
                     logger.info(f"[{theme.name}] Processing article: {article.title[:50]}... | Source: {article.source_name[:30]}...")
 

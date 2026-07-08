@@ -111,6 +111,9 @@ class NewsAnalyzer:
                     return response_content
                 except Exception as exc:
                     logger.error(f"[{logger_tag}] Error with model {cur_model} for '{article_title}' (attempt {attempt}): {exc}")
+                    if "quota" in str(exc).lower():
+                        logger.warning(f"[{logger_tag}] Quota error detected. Skipping delay and retries for this model.")
+                        break
                     if attempt < max_retries:
                         delay = extract_retry_delay(exc)
                         wait_time = min(delay + 1 if delay > 0 else 5, 60)

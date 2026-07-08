@@ -144,11 +144,48 @@ def test_fallback_logic():
         assert m2.chat.completions.create.called
         print("[PASS] Fallback logic test passed")
 
+def test_quota_error_no_wait():
+    print("Testing NewsAnalyzer quota error logic (no wait)...")
+    llm_config = LLMConfig(
+        primary_api_key="p-key", primary_base_url="http://p", primary_model="p-m", primary_timeout=120,
+        primary_backup_api_key="pb-key", primary_backup_base_url="http://pb", primary_backup_model="pb-m", primary_backup_timeout=120,
+        secondary_api_key="s-key", secondary_base_url="http://s", secondary_model="s-m", secondary_timeout=60
+    )
+    embedding_config = EmbeddingConfig(
+        embedding_api_key="e-key", embedding_base_url="http://e", embedding_model="e-m", embedding_timeout=60
+    )
+
+    with patch('src.analyzer_llm.OpenAI') as mock_openai, patch('time.sleep') as mock_sleep:
+        m1, m2, m3, m4 = MagicMock(), MagicMock(), MagicMock(), MagicMock()
+        mock_openai.side_effect = [m1, m2, m3, m4]
+
+        analyzer = NewsAnalyzer(llm_config, embedding_config)
+
+        # Mock primary client to fail with a quota limit error
+        m1.chat.completions.create.side_effect = Exception("429 Resource exhausted: User quota exceeded for project")
+
+        # Mock backup client to succeed
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = '{"relevance_score": 5, "importance_score": 5, "urgency_score": 5, "reasoning": "Fallback worked after quota"}'
+        m2.chat.completions.create.return_value = mock_response
+
+        # Call analyze_scores
+        result = analyzer.analyze_scores("Quota Title", "Quota Content", "Test Focus")
+
+        # Verify fallback succeeded and mock_sleep was NOT called
+        assert result.relevance_score == 5, f"Expected 5, got {result.relevance_score}"
+        assert m1.chat.completions.create.call_count == 1, f"Expected 1 call (no retries), got {m1.chat.completions.create.call_count}"
+        assert m2.chat.completions.create.called
+        assert mock_sleep.call_count == 0, f"Expected 0 calls to sleep, got {mock_sleep.call_count}"
+        print("[PASS] Quota error logic test passed (no sleep, no retries on primary)")
+
 if __name__ == "__main__":
     try:
         test_config_initialization()
         test_client_usage()
         test_fallback_logic()
+        test_quota_error_no_wait()
         print("\nAll verification tests passed!")
     except Exception as e:
         print(f"\n[FAIL] Test failed: {e}")
