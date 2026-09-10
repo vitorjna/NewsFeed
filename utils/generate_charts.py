@@ -29,6 +29,12 @@ def load_config(config_path="config/config.yaml"):
     with open(config_path, 'r', encoding='utf-8') as f:
         return yaml.safe_load(f)
 
+def compute_rolling_avg(values, window=7):
+    return [
+        round(sum(values[max(0, i - window + 1):i + 1]) / len(values[max(0, i - window + 1):i + 1]), 1)
+        for i in range(len(values))
+    ]
+
 def parse_file(filepath):
     data = {'dates': [], 'seen': [], 'pub': [], 'rate': []}
     with open(filepath, 'r', encoding='utf-8') as f:
@@ -47,6 +53,9 @@ def parse_file(filepath):
                 data['seen'].append(seen)
                 data['pub'].append(pub)
                 data['rate'].append(rate)
+    data['seen_avg'] = compute_rolling_avg(data['seen'])
+    data['pub_avg'] = compute_rolling_avg(data['pub'])
+    data['rate_avg'] = compute_rolling_avg(data['rate'])
     return data
 
 def main():
@@ -96,6 +105,34 @@ def main():
             text-align: center;
             margin-bottom: 30px;
         }}
+        .toggle-container {{
+            display: inline-flex;
+            background-color: #e0e0e0;
+            border-radius: 24px;
+            padding: 4px;
+            margin-top: 15px;
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+        }}
+        .toggle-btn {{
+            border: none;
+            background: none;
+            padding: 8px 18px;
+            font-size: 14px;
+            font-weight: 500;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            color: #555;
+        }}
+        .toggle-btn.active {{
+            background-color: #ffffff;
+            color: #1a73e8;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+            font-weight: 600;
+        }}
+        .toggle-btn:hover:not(.active) {{
+            color: #111;
+        }}
         .charts-container {{
             display: flex;
             flex-direction: column;
@@ -122,6 +159,11 @@ def main():
     <div class="header">
         <h1>Daily Theme Statistics</h1>
         <p>Evolution of articles seen, published, and publish rate.</p>
+        <div class="toggle-container">
+            <button class="toggle-btn active" data-view="daily" onclick="switchView('daily')">Daily Stats</button>
+            <button class="toggle-btn" data-view="rolling" onclick="switchView('rolling')">7-Day Rolling Average</button>
+            <button class="toggle-btn" data-view="both" onclick="switchView('both')">Both</button>
+        </div>
     </div>
 
     <div class="charts-container" id="charts"></div>
@@ -129,6 +171,26 @@ def main():
     <script>
         const themesData = {json.dumps(themes_data)};
         const chartsDiv = document.getElementById('charts');
+        const charts = [];
+
+        function switchView(view) {{
+            document.querySelectorAll('.toggle-btn').forEach(btn => {{
+                btn.classList.toggle('active', btn.dataset.view === view);
+            }});
+
+            const showDaily = (view === 'daily' || view === 'both');
+            const showRolling = (view === 'rolling' || view === 'both');
+
+            charts.forEach(chart => {{
+                chart.setDatasetVisibility(0, showDaily);
+                chart.setDatasetVisibility(1, showDaily);
+                chart.setDatasetVisibility(2, showDaily);
+                chart.setDatasetVisibility(3, showRolling);
+                chart.setDatasetVisibility(4, showRolling);
+                chart.setDatasetVisibility(5, showRolling);
+                chart.update();
+            }});
+        }}
 
         for (const [theme, data] of Object.entries(themesData)) {{
             const themeCard = document.createElement('div');
@@ -149,7 +211,7 @@ def main():
             themeCard.appendChild(canvasContainer);
             chartsDiv.appendChild(themeCard);
 
-            new Chart(canvas, {{
+            const chart = new Chart(canvas, {{
                 type: 'line',
                 data: {{
                     labels: data.dates,
@@ -180,6 +242,39 @@ def main():
                             yAxisID: 'y1',
                             tension: 0.3,
                             fill: false
+                        }},
+                        {{
+                            label: 'Seen (7d Avg)',
+                            data: data.seen_avg,
+                            borderColor: 'rgb(26, 115, 232)',
+                            backgroundColor: 'rgba(26, 115, 232, 0.1)',
+                            borderDash: [5, 5],
+                            yAxisID: 'y',
+                            tension: 0.3,
+                            fill: false,
+                            hidden: true
+                        }},
+                        {{
+                            label: 'Published (7d Avg)',
+                            data: data.pub_avg,
+                            borderColor: 'rgb(0, 150, 136)',
+                            backgroundColor: 'rgba(0, 150, 136, 0.1)',
+                            borderDash: [5, 5],
+                            yAxisID: 'y',
+                            tension: 0.3,
+                            fill: false,
+                            hidden: true
+                        }},
+                        {{
+                            label: 'Publish Rate (7d Avg %)',
+                            data: data.rate_avg,
+                            borderColor: 'rgb(216, 27, 96)',
+                            backgroundColor: 'rgba(216, 27, 96, 0.1)',
+                            borderDash: [5, 5],
+                            yAxisID: 'y1',
+                            tension: 0.3,
+                            fill: false,
+                            hidden: true
                         }}
                     ]
                 }},
@@ -191,6 +286,16 @@ def main():
                         intersect: false,
                     }},
                     plugins: {{
+                        legend: {{
+                            onClick: function(e, legendItem, legend) {{
+                                const index = legendItem.datasetIndex;
+                                const isVisible = legend.chart.isDatasetVisible(index);
+                                charts.forEach(c => {{
+                                    c.setDatasetVisibility(index, !isVisible);
+                                    c.update();
+                                }});
+                            }}
+                        }},
                         tooltip: {{
                             callbacks: {{
                                 label: function(context) {{
@@ -230,6 +335,8 @@ def main():
                             type: 'linear',
                             display: true,
                             position: 'right',
+                            beginAtZero: true,
+                            min: 0,
                             title: {{
                                 display: true,
                                 text: 'Publish Rate (%)'
@@ -241,6 +348,7 @@ def main():
                     }}
                 }}
             }});
+            charts.push(chart);
         }}
     </script>
 </body>
